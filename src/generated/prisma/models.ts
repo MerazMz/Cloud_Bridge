@@ -11,4 +11,5 @@
 export type * from './models/User'
 export type * from './models/Session'
 export type * from './models/File'
+export type * from './models/UploadJob'
 export type * from './commonInputTypes'

@@ -1,28 +1,25 @@
 import { NextRequest } from "next/server";
-import { successResponse, errorResponse } from "@/lib/api-response";
 import { getCurrentUserId } from "@/services/auth/auth.service";
 import { prisma } from "@/lib/prisma";
 import { createLogger } from "@/lib/logger";
-import {
-  getClientForUser,
-  uploadFileToTelegram,
-} from "@/services/telegram/telegram.service";
-import type { TelegramClient } from "telegram";
+import { uploadService } from "@/services/upload/upload.service";
 
 const log = createLogger("API:files:upload");
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
-  let client: TelegramClient | null = null;
-
   try {
+    // 1. Authenticate user
     const userId = await getCurrentUserId();
     if (!userId) {
-      return errorResponse("Not authenticated.", 401);
+      return new Response(
+        JSON.stringify({ success: false, message: "Not authenticated." }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
     }
 
-    // Get user storage channel information
+    // 2. Check storage channel exists
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -32,76 +29,47 @@ export async function POST(request: NextRequest) {
     });
 
     if (!user || !user.storageChannelId || !user.storageChannelAccessHash) {
-      return errorResponse(
-        "Storage channel is not set up. Please refresh your dashboard.",
-        400
+      return new Response(
+        JSON.stringify({ success: false, message: "Storage channel is not set up." }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    // Parse the uploaded file from the request
+    // 3. Parse request Form Data
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
 
     if (!file) {
-      return errorResponse("No file provided in request.", 400);
+      return new Response(
+        JSON.stringify({ success: false, message: "No file provided." }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
     }
 
     const fileName = file.name || "unnamed_file";
     const fileSize = file.size;
     const mimeType = file.type || "application/octet-stream";
 
-    log.info("Processing file upload", { fileName, fileSize, mimeType });
+    log.info("Ingesting stream upload", { fileName, fileSize, mimeType });
 
-    // Convert file to buffer
-    const arrayBuffer = await file.arrayBuffer();
-    const fileBuffer = Buffer.from(arrayBuffer);
-
-    // Get Telegram client
-    client = await getClientForUser(userId);
-
-    // Upload to Telegram channel
-    const messageId = await uploadFileToTelegram(
-      client,
-      user.storageChannelId,
-      user.storageChannelAccessHash,
-      fileBuffer,
-      fileName
+    // 4. Stream to disk and queue background worker job
+    const jobId = await uploadService.initiateUpload(
+      userId,
+      fileName,
+      fileSize,
+      mimeType,
+      file.stream() as unknown as ReadableStream<Uint8Array>
     );
 
-    // Store in DB
-    const dbFile = await prisma.file.create({
-      data: {
-        userId,
-        telegramMessageId: messageId,
-        fileName,
-        fileSize: BigInt(fileSize),
-        mimeType,
-      },
-    });
-
-    log.info("File successfully registered in database", { fileId: dbFile.id });
-
-    return successResponse(
-      {
-        id: dbFile.id,
-        fileName: dbFile.fileName,
-        fileSize: Number(dbFile.fileSize),
-        mimeType: dbFile.mimeType,
-        createdAt: dbFile.createdAt.toISOString(),
-      },
-      "File uploaded successfully."
+    return new Response(
+      JSON.stringify({ success: true, jobId }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
     );
-  } catch (error) {
-    log.error("Failed to upload file", error);
-    const message = error instanceof Error ? error.message : "Failed to upload file.";
-    return errorResponse(message, 500);
-  } finally {
-    if (client) {
-      try {
-        await client.disconnect();
-      } catch {
-        // Ignore disconnect errors
-      }
-    }
+  } catch (error: any) {
+    log.error("Failed to ingest streaming file upload", error);
+    return new Response(
+      JSON.stringify({ success: false, message: error.message || "Upload ingestion failed." }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
   }
 }

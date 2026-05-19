@@ -32,3 +32,8 @@ export type Session = Prisma.SessionModel
  * 
  */
 export type File = Prisma.FileModel
+/**
+ * Model UploadJob
+ * 
+ */
+export type UploadJob = Prisma.UploadJobModel
