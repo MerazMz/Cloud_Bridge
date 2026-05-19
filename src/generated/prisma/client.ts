@@ -51,3 +51,8 @@ export type User = Prisma.UserModel
  * 
  */
 export type Session = Prisma.SessionModel
+/**
+ * Model File
+ * 
+ */
+export type File = Prisma.FileModel

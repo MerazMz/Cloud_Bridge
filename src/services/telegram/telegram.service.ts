@@ -1,8 +1,11 @@
-import { Api } from "telegram";
+import { Api, TelegramClient } from "telegram";
 import { computeCheck } from "telegram/Password";
 import bigInt from "big-integer";
+import { CustomFile } from "telegram/client/uploads";
 import { createTelegramClient, saveSessionString } from "./client";
 import { createLogger } from "@/lib/logger";
+import { decryptSession } from "@/services/crypto/crypto.service";
+import { prisma } from "@/lib/prisma";
 
 const log = createLogger("TelegramService");
 
@@ -435,4 +438,139 @@ function extractUserInfo(user: Api.User): TelegramUserInfo {
     username: user.username || undefined,
     phone: user.phone || "",
   };
+}
+
+/**
+ * Retrieve and connect a TelegramClient for a given database user.
+ */
+export async function getClientForUser(userId: string): Promise<TelegramClient> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      telegramSessionEncrypted: true,
+      telegramSessionIv: true,
+      telegramSessionAuthTag: true,
+    },
+  });
+
+  if (!user) {
+    throw new Error("User not found.");
+  }
+
+  if (
+    !user.telegramSessionEncrypted ||
+    !user.telegramSessionIv ||
+    !user.telegramSessionAuthTag
+  ) {
+    throw new Error("User does not have an active Telegram session.");
+  }
+
+  const sessionString = decryptSession(
+    user.telegramSessionEncrypted,
+    user.telegramSessionIv,
+    user.telegramSessionAuthTag
+  );
+
+  const client = createTelegramClient(sessionString);
+  await client.connect();
+  return client;
+}
+
+/**
+ * Upload a file buffer to a user's storage channel.
+ */
+export async function uploadFileToTelegram(
+  client: TelegramClient,
+  channelId: bigint,
+  accessHash: string,
+  fileBuffer: Buffer,
+  fileName: string
+): Promise<number> {
+  const channelPeer = new Api.InputPeerChannel({
+    channelId: bigInt(channelId.toString()),
+    accessHash: bigInt(accessHash),
+  });
+
+  const fileToUpload = new CustomFile(
+    fileName,
+    fileBuffer.length,
+    "",
+    fileBuffer
+  );
+
+  log.info("Uploading file to Telegram channel", { fileName, size: fileBuffer.length });
+
+  const message = await client.sendFile(channelPeer, {
+    file: fileToUpload,
+    forceDocument: true,
+  });
+
+  if (!message || !message.id) {
+    throw new Error("Failed to upload file to Telegram: no message ID returned.");
+  }
+
+  log.info("File uploaded successfully to Telegram", { messageId: message.id });
+  return message.id;
+}
+
+/**
+ * Download a file from a user's storage channel using the message ID.
+ */
+export async function downloadFileFromTelegram(
+  client: TelegramClient,
+  channelId: bigint,
+  accessHash: string,
+  messageId: number
+): Promise<Buffer> {
+  const channelPeer = new Api.InputPeerChannel({
+    channelId: bigInt(channelId.toString()),
+    accessHash: bigInt(accessHash),
+  });
+
+  log.info("Fetching message from Telegram channel", { messageId });
+
+  const messages = await client.getMessages(channelPeer, {
+    ids: [messageId],
+  });
+
+  const message = messages[0];
+  if (!message || !message.media) {
+    throw new Error("File not found or has no media content on Telegram.");
+  }
+
+  log.info("Downloading file media from Telegram", { messageId });
+
+  const buffer = await client.downloadMedia(message.media);
+
+  if (!buffer || !(buffer instanceof Buffer)) {
+    throw new Error("Failed to download file media from Telegram.");
+  }
+
+  return buffer;
+}
+
+/**
+ * Delete a file message from a user's storage channel.
+ */
+export async function deleteFileFromTelegram(
+  client: TelegramClient,
+  channelId: bigint,
+  accessHash: string,
+  messageId: number
+): Promise<void> {
+  const channelPeer = new Api.InputPeerChannel({
+    channelId: bigInt(channelId.toString()),
+    accessHash: bigInt(accessHash),
+  });
+
+  log.info("Deleting message from Telegram channel", { messageId });
+
+  await client.invoke(
+    new Api.channels.DeleteMessages({
+      channel: channelPeer,
+      id: [messageId],
+    })
+  );
+
+  log.info("Message deleted successfully from Telegram channel", { messageId });
 }

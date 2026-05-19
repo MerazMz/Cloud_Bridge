@@ -24,6 +24,7 @@ model User {
   updatedAt                DateTime @updatedAt
 
   sessions Session[]
+  files    File[]
 
   @@map("users")
 }
@@ -42,4 +43,20 @@ model Session {
   @@index([userId])
   @@index([refreshToken])
   @@map("sessions")
+}
+
+model File {
+  id                String   @id @default(cuid())
+  userId            String
+  telegramMessageId Int
+  fileName          String
+  fileSize          BigInt
+  mimeType          String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("files")
 }
