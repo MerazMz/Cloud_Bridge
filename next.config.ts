@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // big-integer is used by GramJS and needs native Node.js modules
+  serverExternalPackages: ["big-integer"],
 };
 
 export default nextConfig;
