@@ -23,6 +23,7 @@ export async function GET() {
       fileName: file.fileName,
       fileSize: Number(file.fileSize),
       mimeType: file.mimeType,
+      isDeleted: file.isDeleted,
       createdAt: file.createdAt.toISOString(),
     }));
 

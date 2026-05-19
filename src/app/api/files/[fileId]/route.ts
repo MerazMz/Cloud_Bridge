@@ -117,45 +117,58 @@ export async function DELETE(
       return errorResponse("Unauthorized.", 403);
     }
 
-    // Get user storage channel info
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        storageChannelId: true,
-        storageChannelAccessHash: true,
-      },
-    });
+    // Read query parameters
+    const url = new URL(request.url);
+    const permanent = url.searchParams.get("permanent") === "true";
 
-    if (!user || !user.storageChannelId || !user.storageChannelAccessHash) {
-      return errorResponse("Storage channel configuration is missing.", 400);
-    }
-
-    // Restore Telegram client
-    client = await getClientForUser(userId);
-
-    // Delete message from Telegram
-    try {
-      await deleteFileFromTelegram(
-        client,
-        user.storageChannelId,
-        user.storageChannelAccessHash,
-        file.telegramMessageId
-      );
-    } catch (telegramError) {
-      // Log the error but proceed with DB deletion so the UI stays in sync if the message was already deleted manually
-      log.warn("Telegram file deletion failed or file already deleted, cleaning up from DB", {
-        error: telegramError,
+    if (permanent) {
+      // Permanent Delete: remove from Telegram and database
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          storageChannelId: true,
+          storageChannelAccessHash: true,
+        },
       });
+
+      if (!user || !user.storageChannelId || !user.storageChannelAccessHash) {
+        return errorResponse("Storage channel configuration is missing.", 400);
+      }
+
+      // Restore Telegram client
+      client = await getClientForUser(userId);
+
+      // Delete message from Telegram
+      try {
+        await deleteFileFromTelegram(
+          client,
+          user.storageChannelId,
+          user.storageChannelAccessHash,
+          file.telegramMessageId
+        );
+      } catch (telegramError) {
+        log.warn("Telegram file deletion failed or file already deleted, cleaning up from DB", {
+          error: telegramError,
+        });
+      }
+
+      // Delete metadata from DB
+      await prisma.file.delete({
+        where: { id: fileId },
+      });
+
+      log.info("File permanently deleted from Telegram and database", { fileId });
+      return successResponse(null, "File permanently deleted.");
+    } else {
+      // Soft Delete: just update database isDeleted flag
+      await prisma.file.update({
+        where: { id: fileId },
+        data: { isDeleted: true },
+      });
+
+      log.info("File soft deleted (moved to trash)", { fileId });
+      return successResponse(null, "File moved to trash successfully.");
     }
-
-    // Delete metadata from DB
-    await prisma.file.delete({
-      where: { id: fileId },
-    });
-
-    log.info("File successfully deleted from database", { fileId });
-
-    return successResponse(null, "File deleted successfully.");
   } catch (error) {
     log.error("Failed to delete file", error);
     const message =
@@ -169,5 +182,44 @@ export async function DELETE(
         // Ignore disconnect errors
       }
     }
+  }
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ fileId: string }> }
+) {
+  try {
+    const { fileId } = await params;
+    const userId = await getCurrentUserId();
+    if (!userId) {
+      return errorResponse("Not authenticated.", 401);
+    }
+
+    const file = await prisma.file.findUnique({
+      where: { id: fileId },
+    });
+
+    if (!file) {
+      return errorResponse("File not found.", 404);
+    }
+
+    if (file.userId !== userId) {
+      return errorResponse("Unauthorized.", 403);
+    }
+
+    const body = await request.json();
+    const isDeleted = typeof body.isDeleted === "boolean" ? body.isDeleted : false;
+
+    const updatedFile = await prisma.file.update({
+      where: { id: fileId },
+      data: { isDeleted },
+    });
+
+    log.info("File status updated", { fileId, isDeleted });
+    return successResponse(updatedFile, "File updated successfully.");
+  } catch (error) {
+    log.error("Failed to update file", error);
+    return errorResponse("Failed to update file.", 500);
   }
 }

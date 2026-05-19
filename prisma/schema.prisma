@@ -52,6 +52,7 @@ model File {
   fileName          String
   fileSize          BigInt
   mimeType          String
+  isDeleted         Boolean  @default(false)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

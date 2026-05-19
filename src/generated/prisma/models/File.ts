@@ -43,6 +43,7 @@ export type FileMinAggregateOutputType = {
   fileName: string | null
   fileSize: bigint | null
   mimeType: string | null
+  isDeleted: boolean | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -54,6 +55,7 @@ export type FileMaxAggregateOutputType = {
   fileName: string | null
   fileSize: bigint | null
   mimeType: string | null
+  isDeleted: boolean | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -65,6 +67,7 @@ export type FileCountAggregateOutputType = {
   fileName: number
   fileSize: number
   mimeType: number
+  isDeleted: number
   createdAt: number
   updatedAt: number
   _all: number
@@ -88,6 +91,7 @@ export type FileMinAggregateInputType = {
   fileName?: true
   fileSize?: true
   mimeType?: true
+  isDeleted?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -99,6 +103,7 @@ export type FileMaxAggregateInputType = {
   fileName?: true
   fileSize?: true
   mimeType?: true
+  isDeleted?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -110,6 +115,7 @@ export type FileCountAggregateInputType = {
   fileName?: true
   fileSize?: true
   mimeType?: true
+  isDeleted?: true
   createdAt?: true
   updatedAt?: true
   _all?: true
@@ -208,6 +214,7 @@ export type FileGroupByOutputType = {
   fileName: string
   fileSize: bigint
   mimeType: string
+  isDeleted: boolean
   createdAt: Date
   updatedAt: Date
   _count: FileCountAggregateOutputType | null
@@ -242,6 +249,7 @@ export type FileWhereInput = {
   fileName?: Prisma.StringFilter<"File"> | string
   fileSize?: Prisma.BigIntFilter<"File"> | bigint | number
   mimeType?: Prisma.StringFilter<"File"> | string
+  isDeleted?: Prisma.BoolFilter<"File"> | boolean
   createdAt?: Prisma.DateTimeFilter<"File"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"File"> | Date | string
   user?: Prisma.XOR<Prisma.UserScalarRelationFilter, Prisma.UserWhereInput>
@@ -254,6 +262,7 @@ export type FileOrderByWithRelationInput = {
   fileName?: Prisma.SortOrder
   fileSize?: Prisma.SortOrder
   mimeType?: Prisma.SortOrder
+  isDeleted?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   user?: Prisma.UserOrderByWithRelationInput
@@ -269,6 +278,7 @@ export type FileWhereUniqueInput = Prisma.AtLeast<{
   fileName?: Prisma.StringFilter<"File"> | string
   fileSize?: Prisma.BigIntFilter<"File"> | bigint | number
   mimeType?: Prisma.StringFilter<"File"> | string
+  isDeleted?: Prisma.BoolFilter<"File"> | boolean
   createdAt?: Prisma.DateTimeFilter<"File"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"File"> | Date | string
   user?: Prisma.XOR<Prisma.UserScalarRelationFilter, Prisma.UserWhereInput>
@@ -281,6 +291,7 @@ export type FileOrderByWithAggregationInput = {
   fileName?: Prisma.SortOrder
   fileSize?: Prisma.SortOrder
   mimeType?: Prisma.SortOrder
+  isDeleted?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   _count?: Prisma.FileCountOrderByAggregateInput
@@ -300,6 +311,7 @@ export type FileScalarWhereWithAggregatesInput = {
   fileName?: Prisma.StringWithAggregatesFilter<"File"> | string
   fileSize?: Prisma.BigIntWithAggregatesFilter<"File"> | bigint | number
   mimeType?: Prisma.StringWithAggregatesFilter<"File"> | string
+  isDeleted?: Prisma.BoolWithAggregatesFilter<"File"> | boolean
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"File"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"File"> | Date | string
 }
@@ -310,6 +322,7 @@ export type FileCreateInput = {
   fileName: string
   fileSize: bigint | number
   mimeType: string
+  isDeleted?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
   user: Prisma.UserCreateNestedOneWithoutFilesInput
@@ -322,6 +335,7 @@ export type FileUncheckedCreateInput = {
   fileName: string
   fileSize: bigint | number
   mimeType: string
+  isDeleted?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -332,6 +346,7 @@ export type FileUpdateInput = {
   fileName?: Prisma.StringFieldUpdateOperationsInput | string
   fileSize?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   mimeType?: Prisma.StringFieldUpdateOperationsInput | string
+  isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   user?: Prisma.UserUpdateOneRequiredWithoutFilesNestedInput
@@ -344,6 +359,7 @@ export type FileUncheckedUpdateInput = {
   fileName?: Prisma.StringFieldUpdateOperationsInput | string
   fileSize?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   mimeType?: Prisma.StringFieldUpdateOperationsInput | string
+  isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -355,6 +371,7 @@ export type FileCreateManyInput = {
   fileName: string
   fileSize: bigint | number
   mimeType: string
+  isDeleted?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -365,6 +382,7 @@ export type FileUpdateManyMutationInput = {
   fileName?: Prisma.StringFieldUpdateOperationsInput | string
   fileSize?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   mimeType?: Prisma.StringFieldUpdateOperationsInput | string
+  isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -376,6 +394,7 @@ export type FileUncheckedUpdateManyInput = {
   fileName?: Prisma.StringFieldUpdateOperationsInput | string
   fileSize?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   mimeType?: Prisma.StringFieldUpdateOperationsInput | string
+  isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -397,6 +416,7 @@ export type FileCountOrderByAggregateInput = {
   fileName?: Prisma.SortOrder
   fileSize?: Prisma.SortOrder
   mimeType?: Prisma.SortOrder
+  isDeleted?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -413,6 +433,7 @@ export type FileMaxOrderByAggregateInput = {
   fileName?: Prisma.SortOrder
   fileSize?: Prisma.SortOrder
   mimeType?: Prisma.SortOrder
+  isDeleted?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -424,6 +445,7 @@ export type FileMinOrderByAggregateInput = {
   fileName?: Prisma.SortOrder
   fileSize?: Prisma.SortOrder
   mimeType?: Prisma.SortOrder
+  isDeleted?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -483,12 +505,17 @@ export type IntFieldUpdateOperationsInput = {
   divide?: number
 }
 
+export type BoolFieldUpdateOperationsInput = {
+  set?: boolean
+}
+
 export type FileCreateWithoutUserInput = {
   id?: string
   telegramMessageId: number
   fileName: string
   fileSize: bigint | number
   mimeType: string
+  isDeleted?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -499,6 +526,7 @@ export type FileUncheckedCreateWithoutUserInput = {
   fileName: string
   fileSize: bigint | number
   mimeType: string
+  isDeleted?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -539,6 +567,7 @@ export type FileScalarWhereInput = {
   fileName?: Prisma.StringFilter<"File"> | string
   fileSize?: Prisma.BigIntFilter<"File"> | bigint | number
   mimeType?: Prisma.StringFilter<"File"> | string
+  isDeleted?: Prisma.BoolFilter<"File"> | boolean
   createdAt?: Prisma.DateTimeFilter<"File"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"File"> | Date | string
 }
@@ -549,6 +578,7 @@ export type FileCreateManyUserInput = {
   fileName: string
   fileSize: bigint | number
   mimeType: string
+  isDeleted?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -559,6 +589,7 @@ export type FileUpdateWithoutUserInput = {
   fileName?: Prisma.StringFieldUpdateOperationsInput | string
   fileSize?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   mimeType?: Prisma.StringFieldUpdateOperationsInput | string
+  isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -569,6 +600,7 @@ export type FileUncheckedUpdateWithoutUserInput = {
   fileName?: Prisma.StringFieldUpdateOperationsInput | string
   fileSize?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   mimeType?: Prisma.StringFieldUpdateOperationsInput | string
+  isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -579,6 +611,7 @@ export type FileUncheckedUpdateManyWithoutUserInput = {
   fileName?: Prisma.StringFieldUpdateOperationsInput | string
   fileSize?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   mimeType?: Prisma.StringFieldUpdateOperationsInput | string
+  isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -592,6 +625,7 @@ export type FileSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = r
   fileName?: boolean
   fileSize?: boolean
   mimeType?: boolean
+  isDeleted?: boolean
   createdAt?: boolean
   updatedAt?: boolean
   user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
@@ -604,6 +638,7 @@ export type FileSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensio
   fileName?: boolean
   fileSize?: boolean
   mimeType?: boolean
+  isDeleted?: boolean
   createdAt?: boolean
   updatedAt?: boolean
   user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
@@ -616,6 +651,7 @@ export type FileSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensio
   fileName?: boolean
   fileSize?: boolean
   mimeType?: boolean
+  isDeleted?: boolean
   createdAt?: boolean
   updatedAt?: boolean
   user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
@@ -628,11 +664,12 @@ export type FileSelectScalar = {
   fileName?: boolean
   fileSize?: boolean
   mimeType?: boolean
+  isDeleted?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }
 
-export type FileOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "userId" | "telegramMessageId" | "fileName" | "fileSize" | "mimeType" | "createdAt" | "updatedAt", ExtArgs["result"]["file"]>
+export type FileOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "userId" | "telegramMessageId" | "fileName" | "fileSize" | "mimeType" | "isDeleted" | "createdAt" | "updatedAt", ExtArgs["result"]["file"]>
 export type FileInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
 }
@@ -655,6 +692,7 @@ export type $FilePayload<ExtArgs extends runtime.Types.Extensions.InternalArgs =
     fileName: string
     fileSize: bigint
     mimeType: string
+    isDeleted: boolean
     createdAt: Date
     updatedAt: Date
   }, ExtArgs["result"]["file"]>
@@ -1087,6 +1125,7 @@ export interface FileFieldRefs {
   readonly fileName: Prisma.FieldRef<"File", 'String'>
   readonly fileSize: Prisma.FieldRef<"File", 'BigInt'>
   readonly mimeType: Prisma.FieldRef<"File", 'String'>
+  readonly isDeleted: Prisma.FieldRef<"File", 'Boolean'>
   readonly createdAt: Prisma.FieldRef<"File", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"File", 'DateTime'>
 }

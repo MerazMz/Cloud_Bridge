@@ -1,18 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 
-export default function ProtectedLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const { user, loading, logout } = useAuth();
-  const pathname = usePathname();
+function LayoutWithSidebarContent({ children }: { children: React.ReactNode }) {
+  const { user, logout } = useAuth();
+  const searchParams = useSearchParams();
+  const tab = searchParams.get("tab") || "dashboard";
   const [totalSize, setTotalSize] = useState(0);
 
   // Fetch files to update sidebar storage progress bar
@@ -22,7 +19,9 @@ export default function ProtectedLayout({
         .then((res) => res.json())
         .then((json) => {
           if (json.success && Array.isArray(json.data)) {
-            const size = json.data.reduce((acc: number, f: any) => acc + Number(f.fileSize), 0);
+            const size = json.data
+              .filter((f: any) => !f.isDeleted)
+              .reduce((acc: number, f: any) => acc + Number(f.fileSize), 0);
             setTotalSize(size);
           }
         })
@@ -30,25 +29,7 @@ export default function ProtectedLayout({
     }
   }, [user]);
 
-  if (loading) {
-    return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          minHeight: "100vh",
-          background: "var(--bg-primary)",
-        }}
-      >
-        <LoadingSpinner size="lg" label="Loading CloudBridge..." />
-      </div>
-    );
-  }
-
-  if (!user) {
-    return null; // Let middleware / proxy redirect to login
-  }
+  if (!user) return null;
 
   // Format bytes helper
   const formatGB = (bytes: number) => {
@@ -59,6 +40,9 @@ export default function ProtectedLayout({
   const limitGB = 100;
   const usedGB = Number(formatGB(totalSize));
   const usagePercent = Math.min(Math.round((usedGB / limitGB) * 100), 100);
+
+  const userName = user.displayName || user.username || user.phoneNumber || "User";
+  const userInitials = userName.slice(0, 2).toUpperCase();
 
   return (
     <div className="app-container">
@@ -104,34 +88,34 @@ export default function ProtectedLayout({
 
         {/* Navigation links */}
         <nav style={{ display: "flex", flexDirection: "column", gap: "0.4rem", flex: 1 }}>
-          <Link href="/dashboard" className={`nav-link ${pathname === "/dashboard" ? "active" : ""}`}>
+          <Link href="/dashboard?tab=dashboard" className={`nav-link ${tab === "dashboard" ? "active" : ""}`}>
             <span style={{ fontSize: "1.1rem" }}>🏠</span>
             <span>Dashboard</span>
           </Link>
-          <a href="#" onClick={(e) => e.preventDefault()} className="nav-link">
+          <Link href="/dashboard?tab=my-files" className={`nav-link ${tab === "my-files" ? "active" : ""}`}>
             <span style={{ fontSize: "1.1rem" }}>📁</span>
             <span>My Files</span>
-          </a>
-          <a href="#" onClick={(e) => e.preventDefault()} className="nav-link">
+          </Link>
+          <Link href="/dashboard?tab=folders" className={`nav-link ${tab === "folders" ? "active" : ""}`}>
             <span style={{ fontSize: "1.1rem" }}>📂</span>
             <span>Folders</span>
-          </a>
-          <a href="#" onClick={(e) => e.preventDefault()} className="nav-link">
+          </Link>
+          <Link href="/dashboard?tab=recent" className={`nav-link ${tab === "recent" ? "active" : ""}`}>
             <span style={{ fontSize: "1.1rem" }}>🕒</span>
             <span>Recent</span>
-          </a>
-          <a href="#" onClick={(e) => e.preventDefault()} className="nav-link">
+          </Link>
+          <Link href="/dashboard?tab=favorites" className={`nav-link ${tab === "favorites" ? "active" : ""}`}>
             <span style={{ fontSize: "1.1rem" }}>⭐</span>
             <span>Favorites</span>
-          </a>
-          <a href="#" onClick={(e) => e.preventDefault()} className="nav-link">
+          </Link>
+          <Link href="/dashboard?tab=shared" className={`nav-link ${tab === "shared" ? "active" : ""}`}>
             <span style={{ fontSize: "1.1rem" }}>👥</span>
             <span>Shared with me</span>
-          </a>
-          <a href="#" onClick={(e) => e.preventDefault()} className="nav-link">
+          </Link>
+          <Link href="/dashboard?tab=trash" className={`nav-link ${tab === "trash" ? "active" : ""}`}>
             <span style={{ fontSize: "1.1rem" }}>🗑️</span>
             <span>Trash</span>
-          </a>
+          </Link>
         </nav>
 
         {/* Storage Usage Card */}
@@ -221,7 +205,7 @@ export default function ProtectedLayout({
               textTransform: "uppercase",
             }}
           >
-            {user.displayName ? user.displayName.slice(0, 2) : "CB"}
+            {userInitials}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <p
@@ -234,7 +218,7 @@ export default function ProtectedLayout({
                 whiteSpace: "nowrap",
               }}
             >
-              {user.displayName || "Aditya Kumar"}
+              {userName}
             </p>
             <p
               style={{
@@ -245,7 +229,7 @@ export default function ProtectedLayout({
                 whiteSpace: "nowrap",
               }}
             >
-              {user.username ? `@${user.username}` : "aditya@example.com"}
+              {user.username ? `@${user.username}` : user.phoneNumber}
             </p>
           </div>
           <button
@@ -268,5 +252,53 @@ export default function ProtectedLayout({
       {/* Main viewport */}
       <main className="app-main">{children}</main>
     </div>
+  );
+}
+
+export default function ProtectedLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: "100vh",
+          background: "var(--bg-primary)",
+        }}
+      >
+        <LoadingSpinner size="lg" label="Loading CloudBridge..." />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return null; // Let middleware / proxy redirect to login
+  }
+
+  return (
+    <Suspense
+      fallback={
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            minHeight: "100vh",
+            background: "var(--bg-primary)",
+          }}
+        >
+          <LoadingSpinner size="lg" label="Loading view..." />
+        </div>
+      }
+    >
+      <LayoutWithSidebarContent>{children}</LayoutWithSidebarContent>
+    </Suspense>
   );
 }
