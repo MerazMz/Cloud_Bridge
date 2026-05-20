@@ -86,7 +86,12 @@ function DashboardContent() {
   // Upload Progress and Cancel State
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadingFileName, setUploadingFileName] = useState<string | null>(null);
+  const [uploadingFileSize, setUploadingFileSize] = useState<number>(0);
+  const [uploadSpeed, setUploadSpeed] = useState<string | null>(null);
+  const [uploadedBytes, setUploadedBytes] = useState<number>(0);
+  const startTimeRef = useRef<number | null>(null);
   const cancelUploadRef = useRef<(() => void) | null>(null);
+  const currentJobIdRef = useRef<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -181,64 +186,102 @@ function DashboardContent() {
     setIsUploading(true);
     setUploadProgress(0);
     setUploadingFileName(file.name);
+    setUploadingFileSize(file.size);
+    setUploadSpeed("0 KB/s");
+    setUploadedBytes(0);
+    startTimeRef.current = Date.now();
+
+    const abortController = new AbortController();
+    cancelUploadRef.current = () => {
+      abortController.abort();
+    };
 
     try {
-      const uploadPromise = new Promise<any>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
+      // 1. Ingest streaming upload to disk and get background queue jobId
+      const formData = new FormData();
+      formData.append("file", file);
 
-        cancelUploadRef.current = () => {
-          xhr.abort();
-          reject(new Error("Upload cancelled"));
-        };
-
-        xhr.upload.addEventListener("progress", (event) => {
-          if (event.lengthComputable) {
-            const percent = Math.round((event.loaded / event.total) * 100);
-            setUploadProgress(percent);
-          }
-        });
-
-        xhr.addEventListener("load", () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              resolve(JSON.parse(xhr.responseText));
-            } catch {
-              resolve({ success: true });
-            }
-          } else {
-            try {
-              reject(JSON.parse(xhr.responseText));
-            } catch {
-              reject(new Error(`Upload failed with status ${xhr.status}`));
-            }
-          }
-        });
-
-        xhr.addEventListener("error", () => {
-          reject(new Error("Upload network error"));
-        });
-
-        xhr.addEventListener("abort", () => {
-          reject(new Error("Upload cancelled"));
-        });
-
-        xhr.open("POST", "/api/files/upload");
-        const formData = new FormData();
-        formData.append("file", file);
-        xhr.send(formData);
+      const ingestResponse = await fetch("/api/files/upload", {
+        method: "POST",
+        body: formData,
+        signal: abortController.signal,
       });
 
-      const json = await uploadPromise;
-      if (json.success) {
-        showToast("success", `${file.name} uploaded successfully.`);
-        addNotification("success", `${file.name} uploaded successfully.`);
-        setFiles((prev) => [json.data, ...prev]);
-      } else {
-        showToast("error", json.message || "Failed to upload file.");
-        addNotification("error", `Failed to upload ${file.name}: ${json.message || "Unknown error"}`);
+      if (!ingestResponse.ok) {
+        const errText = await ingestResponse.text();
+        let errMsg = "Upload failed.";
+        try {
+          const errJson = JSON.parse(errText);
+          errMsg = errJson.message || errMsg;
+        } catch {}
+        throw new Error(errMsg);
+      }
+
+      const { jobId } = await ingestResponse.json();
+      currentJobIdRef.current = jobId;
+
+      // 2. Connect to SSE telemetry stream for live speed, bytes, and percentage
+      const response = await fetch(`/api/files/upload/progress?jobId=${jobId}`, {
+        signal: abortController.signal,
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        let errMsg = "Failed to establish progress stream.";
+        try {
+          const errJson = JSON.parse(errText);
+          errMsg = errJson.message || errMsg;
+        } catch {}
+        throw new Error(errMsg);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("Failed to read progress stream.");
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const cleanLine = line.trim();
+          if (cleanLine.startsWith("data: ")) {
+            const dataStr = cleanLine.slice(6).trim();
+            if (!dataStr) continue;
+
+            try {
+              const parsed = JSON.parse(dataStr);
+              if (parsed.type === "progress") {
+                setUploadProgress(parsed.percent);
+                setUploadedBytes(parsed.uploadedBytes);
+                if (parsed.totalBytes) {
+                  setUploadingFileSize(parsed.totalBytes);
+                }
+                setUploadSpeed(parsed.speed);
+              } else if (parsed.type === "success") {
+                showToast("success", `${file.name} uploaded successfully.`);
+                if (parsed.data) {
+                  setFiles((prev) => [parsed.data, ...prev]);
+                }
+              } else if (parsed.type === "error") {
+                throw new Error(parsed.message || "Failed to upload file.");
+              }
+            } catch (jsonErr) {
+              console.error("Failed to parse progress SSE JSON chunk", jsonErr);
+            }
+          }
+        }
       }
     } catch (err: any) {
-      if (err.message === "Upload cancelled") {
+      if (err.name === "AbortError" || err.message === "Upload cancelled") {
         showToast("info", "Upload cancelled.");
         addNotification("info", `Upload of ${file.name} was cancelled.`);
       } else {
@@ -249,13 +292,26 @@ function DashboardContent() {
       setIsUploading(false);
       setUploadProgress(null);
       setUploadingFileName(null);
+      setUploadSpeed(null);
+      setUploadedBytes(0);
+      setUploadingFileSize(0);
+      startTimeRef.current = null;
       cancelUploadRef.current = null;
+      currentJobIdRef.current = null;
     }
   };
 
-  const handleCancelUpload = () => {
+  const handleCancelUpload = async () => {
     if (cancelUploadRef.current) {
       cancelUploadRef.current();
+    }
+    const jobId = currentJobIdRef.current;
+    if (jobId) {
+      fetch("/api/files/upload/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId }),
+      }).catch((e) => console.error("Failed to propagate cancel signal to queue", e));
     }
   };
 
@@ -1018,7 +1074,28 @@ function DashboardContent() {
               }}
             >
               {isUploading ? (
-                <LoadingSpinner size="md" label="Uploading file to Telegram..." />
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.75rem" }}>
+                  <LoadingSpinner size="md" label="Uploading file to Telegram Cloud..." />
+                  {uploadProgress !== null && (
+                    <div style={{ width: "260px", marginTop: "0.5rem", display: "flex", flexDirection: "column", gap: "0.35rem", alignItems: "center" }}>
+                      <div style={{ width: "100%", height: "6px", background: "var(--border-default)", borderRadius: "3px", overflow: "hidden" }}>
+                        <div
+                          style={{
+                            width: `${uploadProgress}%`,
+                            height: "100%",
+                            background: "linear-gradient(90deg, #6366f1, #a855f7)",
+                            borderRadius: "3px",
+                            transition: "width 0.1s ease",
+                          }}
+                        />
+                      </div>
+                      <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text-secondary)", textAlign: "center" }}>
+                        {uploadProgress}% Uploaded ({formatBytes(uploadedBytes)} of {formatBytes(uploadingFileSize)})
+                        {uploadSpeed && <span style={{ display: "block", color: "var(--color-primary)", marginTop: "0.15rem" }}>⚡ {uploadSpeed}</span>}
+                      </span>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem" }}>
                   <span style={{ fontSize: "2rem", color: "#a855f7" }}>📤</span>
@@ -1319,6 +1396,17 @@ function DashboardContent() {
                 transition: "width 0.1s ease",
               }}
             />
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.1rem" }}>
+            <span>
+              {formatBytes(uploadedBytes)} of {formatBytes(uploadingFileSize)}
+            </span>
+            {uploadSpeed && (
+              <span style={{ fontWeight: 600, color: "var(--color-primary)" }}>
+                ⚡ {uploadSpeed}
+              </span>
+            )}
           </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end" }}>

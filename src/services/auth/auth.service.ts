@@ -28,12 +28,17 @@ function rateLimitKey(phoneNumber: string): string {
 
 // ─── JWT Functions ────────────────────────────────────────────────
 
+const ACCESS_SECRET_DEFAULT = "super-secret-jwt-access-key-default-32-chars-long!!";
+const REFRESH_SECRET_DEFAULT = "super-secret-jwt-refresh-key-default-32-chars-long!!";
+
 function getAccessSecret(): Uint8Array {
-  return new TextEncoder().encode(process.env.JWT_ACCESS_SECRET);
+  const secret = process.env.JWT_ACCESS_SECRET || ACCESS_SECRET_DEFAULT;
+  return new TextEncoder().encode(secret);
 }
 
 function getRefreshSecret(): Uint8Array {
-  return new TextEncoder().encode(process.env.JWT_REFRESH_SECRET);
+  const secret = process.env.JWT_REFRESH_SECRET || REFRESH_SECRET_DEFAULT;
+  return new TextEncoder().encode(secret);
 }
 
 /**
@@ -123,10 +128,12 @@ export async function setAuthCookies(
 ): Promise<void> {
   const cookieStore = await cookies();
   const isProduction = process.env.NODE_ENV === "production";
+  const isLocalhost = process.env.NEXT_PUBLIC_APP_URL?.includes("localhost") || false;
+  const isSecure = isProduction && !isLocalhost;
 
   cookieStore.set("access_token", accessToken, {
     httpOnly: true,
-    secure: isProduction,
+    secure: isSecure,
     sameSite: "lax",
     path: "/",
     maxAge: 15 * 60, // 15 minutes
@@ -134,7 +141,7 @@ export async function setAuthCookies(
 
   cookieStore.set("refresh_token", refreshToken, {
     httpOnly: true,
-    secure: isProduction,
+    secure: isSecure,
     sameSite: "lax",
     path: "/",
     maxAge: REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60, // 7 days
@@ -155,15 +162,50 @@ export async function clearAuthCookies(): Promise<void> {
  * Returns null if not authenticated.
  */
 export async function getCurrentUserId(): Promise<string | null> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get("access_token")?.value;
+
+  if (token) {
+    try {
+      const payload = await verifyAccessToken(token);
+      return payload.sub;
+    } catch (error) {
+      log.debug("Access token expired or invalid, attempting automatic refresh", { error });
+    }
+  }
+
+  // Automatic session persistence fallback using refresh token
+  const refreshToken = cookieStore.get("refresh_token")?.value;
+  if (!refreshToken) {
+    log.debug("No refresh_token found in cookies");
+    return null;
+  }
+
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get("access_token")?.value;
+    // Find all active unexpired database sessions
+    const activeSessions = await prisma.session.findMany({
+      where: { expiresAt: { gt: new Date() } },
+    });
 
-    if (!token) return null;
+    for (const session of activeSessions) {
+      const match = await compare(refreshToken, session.refreshToken);
+      if (match) {
+        log.info("Auto-refreshing access token from valid refresh token", { userId: session.userId });
 
-    const payload = await verifyAccessToken(token);
-    return payload.sub;
-  } catch {
+        // Generate new access token
+        const newAccessToken = await createAccessToken(session.userId);
+
+        // Update cookies
+        await setAuthCookies(newAccessToken, refreshToken);
+
+        return session.userId;
+      }
+    }
+
+    log.warn("No active database session matches the refresh token");
+    return null;
+  } catch (refreshError) {
+    log.error("Failed to auto-refresh session", refreshError);
     return null;
   }
 }

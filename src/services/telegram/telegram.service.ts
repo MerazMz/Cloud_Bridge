@@ -1,4 +1,8 @@
 import { Api, TelegramClient } from "telegram";
+import * as telegramUtils from "telegram/Utils";
+import * as uploads from "telegram/client/uploads";
+import { readBigIntFromBuffer, generateRandomBytes, sleep } from "telegram/Helpers";
+import { errors } from "telegram";
 import { computeCheck } from "telegram/Password";
 import bigInt from "big-integer";
 import { CustomFile } from "telegram/client/uploads";
@@ -6,6 +10,156 @@ import { createTelegramClient, saveSessionString } from "./client";
 import { createLogger } from "@/lib/logger";
 import { decryptSession } from "@/services/crypto/crypto.service";
 import { prisma } from "@/lib/prisma";
+import { promises as fs } from "fs";
+
+// Monkey-patch getAppropriatedPartSize to always return 512 (512KB chunks) for maximum upload performance!
+try {
+  Object.defineProperty(telegramUtils, "getAppropriatedPartSize", {
+    value: function () {
+      return 512;
+    },
+    writable: true,
+    configurable: true,
+  });
+} catch (e) {
+  try {
+    (telegramUtils as any).getAppropriatedPartSize = function () {
+      return 512;
+    };
+  } catch {}
+}
+
+const KB_TO_BYTES = 1024;
+const LARGE_FILE_THRESHOLD = 10 * 1024 * 1024;
+const DISCONNECT_SLEEP = 1000;
+const BUFFER_SIZE_20MB = 20 * 1024 * 1024;
+
+// High-Performance sliding-window concurrent uploader queue replacement for GramJS's slow sequential promise batcher
+async function customUploadFile(client: any, fileParams: any) {
+  const { file, onProgress } = fileParams;
+  let { workers } = fileParams;
+  const { name, size } = file;
+  const fileId = readBigIntFromBuffer(generateRandomBytes(8), true, true);
+  const isLarge = size > LARGE_FILE_THRESHOLD;
+  const partSize = telegramUtils.getAppropriatedPartSize(bigInt(size)) * KB_TO_BYTES;
+  const partCount = Math.floor((size + partSize - 1) / partSize);
+  
+  const getFileBuffer = (uploads as any).getFileBuffer;
+  const buffer = await getFileBuffer(file, size, fileParams.maxBufferSize || BUFFER_SIZE_20MB - 1);
+  
+  await client.getSender(client.session.dcId);
+  if (!workers || !size) {
+    workers = 1;
+  }
+  if (workers >= partCount) {
+    workers = partCount;
+  }
+  
+  let progress = 0;
+  if (onProgress) {
+    onProgress(progress);
+  }
+
+  let nextIndex = 0;
+  let activeWorkers = 0;
+  let hasFailed = false;
+  let uploadError: any = null;
+
+  return new Promise<any>(async (resolve, reject) => {
+    async function startNextWorker() {
+      if (hasFailed) return;
+
+      if (nextIndex >= partCount) {
+        if (activeWorkers === 0 && !hasFailed) {
+          const result = isLarge
+            ? new Api.InputFileBig({ id: fileId, parts: partCount, name })
+            : new Api.InputFile({ id: fileId, parts: partCount, name, md5Checksum: "" });
+          resolve(result);
+        }
+        return;
+      }
+
+      const j = nextIndex++;
+      activeWorkers++;
+
+      try {
+        let endPart = (j + 1) * partSize;
+        if (endPart > size) {
+          endPart = size;
+        }
+        
+        const bytes = await buffer.slice(j * partSize, endPart);
+
+        (async () => {
+          try {
+            while (true) {
+              if (hasFailed) return;
+              let sender;
+              try {
+                sender = await client.getSender(client.session.dcId);
+                await sender.send(
+                  isLarge
+                    ? new Api.upload.SaveBigFilePart({
+                        fileId,
+                        filePart: j,
+                        fileTotalParts: partCount,
+                        bytes,
+                      })
+                    : new Api.upload.SaveFilePart({
+                        fileId,
+                        filePart: j,
+                        bytes,
+                      })
+                );
+                break;
+              } catch (err: any) {
+                if (sender && !sender.isConnected()) {
+                  await sleep(DISCONNECT_SLEEP);
+                  continue;
+                } else if (err instanceof errors.FloodWaitError) {
+                  await sleep(err.seconds * 1000);
+                  continue;
+                }
+                throw err;
+              }
+            }
+
+            if (onProgress) {
+              if (onProgress.isCanceled) {
+                throw new Error("USER_CANCELED");
+              }
+              progress += 1 / partCount;
+              onProgress(progress);
+            }
+          } catch (err) {
+            hasFailed = true;
+            uploadError = err;
+          } finally {
+            activeWorkers--;
+            if (hasFailed) {
+              reject(uploadError);
+            } else {
+              startNextWorker();
+            }
+          }
+        })();
+      } catch (err) {
+        hasFailed = true;
+        uploadError = err;
+        activeWorkers--;
+        reject(uploadError);
+      }
+    }
+
+    for (let w = 0; w < workers; w++) {
+      startNextWorker();
+    }
+  });
+}
+
+try {
+  (uploads as any).uploadFile = customUploadFile;
+} catch (e) {}
 
 const log = createLogger("TelegramService");
 
@@ -483,26 +637,32 @@ export async function uploadFileToTelegram(
   client: TelegramClient,
   channelId: bigint,
   accessHash: string,
-  fileBuffer: Buffer,
-  fileName: string
+  filePath: string,
+  fileName: string,
+  onProgress?: (percent: number) => void
 ): Promise<number> {
   const channelPeer = new Api.InputPeerChannel({
     channelId: bigInt(channelId.toString()),
     accessHash: bigInt(accessHash),
   });
 
+  const stats = await fs.stat(filePath);
+
   const fileToUpload = new CustomFile(
     fileName,
-    fileBuffer.length,
-    "",
-    fileBuffer
+    stats.size,
+    filePath
   );
 
-  log.info("Uploading file to Telegram channel", { fileName, size: fileBuffer.length });
+  log.info("Uploading file to Telegram channel from path", { fileName, size: stats.size });
 
   const message = await client.sendFile(channelPeer, {
     file: fileToUpload,
     forceDocument: true,
+    workers: 8,
+    progressCallback: onProgress ? (progress: any) => {
+      onProgress(Math.round(Number(progress) * 100));
+    } : undefined,
   });
 
   if (!message || !message.id) {

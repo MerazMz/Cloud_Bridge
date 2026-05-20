@@ -386,7 +386,8 @@ type FieldRefInputType<Model, FieldType> = Model extends never ? never : FieldRe
 export const ModelName = {
   User: 'User',
   Session: 'Session',
-  File: 'File'
+  File: 'File',
+  UploadJob: 'UploadJob'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -402,7 +403,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "user" | "session" | "file"
+    modelProps: "user" | "session" | "file" | "uploadJob"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -628,6 +629,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    UploadJob: {
+      payload: Prisma.$UploadJobPayload<ExtArgs>
+      fields: Prisma.UploadJobFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.UploadJobFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UploadJobPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.UploadJobFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UploadJobPayload>
+        }
+        findFirst: {
+          args: Prisma.UploadJobFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UploadJobPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.UploadJobFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UploadJobPayload>
+        }
+        findMany: {
+          args: Prisma.UploadJobFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UploadJobPayload>[]
+        }
+        create: {
+          args: Prisma.UploadJobCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UploadJobPayload>
+        }
+        createMany: {
+          args: Prisma.UploadJobCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.UploadJobCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UploadJobPayload>[]
+        }
+        delete: {
+          args: Prisma.UploadJobDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UploadJobPayload>
+        }
+        update: {
+          args: Prisma.UploadJobUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UploadJobPayload>
+        }
+        deleteMany: {
+          args: Prisma.UploadJobDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.UploadJobUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.UploadJobUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UploadJobPayload>[]
+        }
+        upsert: {
+          args: Prisma.UploadJobUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$UploadJobPayload>
+        }
+        aggregate: {
+          args: Prisma.UploadJobAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateUploadJob>
+        }
+        groupBy: {
+          args: Prisma.UploadJobGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.UploadJobGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.UploadJobCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.UploadJobCountAggregateOutputType> | number
+        }
+      }
+    }
   }
 } & {
   other: {
@@ -713,6 +788,26 @@ export const FileScalarFieldEnum = {
 } as const
 
 export type FileScalarFieldEnum = (typeof FileScalarFieldEnum)[keyof typeof FileScalarFieldEnum]
+
+
+export const UploadJobScalarFieldEnum = {
+  id: 'id',
+  userId: 'userId',
+  fileName: 'fileName',
+  fileSize: 'fileSize',
+  tempFilePath: 'tempFilePath',
+  mimeType: 'mimeType',
+  status: 'status',
+  progress: 'progress',
+  uploadedBytes: 'uploadedBytes',
+  errorMessage: 'errorMessage',
+  retries: 'retries',
+  maxRetries: 'maxRetries',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type UploadJobScalarFieldEnum = (typeof UploadJobScalarFieldEnum)[keyof typeof UploadJobScalarFieldEnum]
 
 
 export const SortOrder = {
@@ -934,6 +1029,7 @@ export type GlobalOmitConfig = {
   user?: Prisma.UserOmit
   session?: Prisma.SessionOmit
   file?: Prisma.FileOmit
+  uploadJob?: Prisma.UploadJobOmit
 }
 
 /* Types for Logging */

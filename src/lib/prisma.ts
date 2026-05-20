@@ -29,7 +29,14 @@ function createPrismaClient(): PrismaClient {
   });
 }
 
-export const prisma = globalForPrisma.prisma ?? createPrismaClient();
+export const prisma = (() => {
+  let client = globalForPrisma.prisma ?? createPrismaClient();
+  // Safe runtime check: if client is cached but lacks the new uploadJob model (e.g., from pre-generation dev server caching), force re-instantiation!
+  if (client && !(client as any).uploadJob) {
+    client = createPrismaClient();
+  }
+  return client;
+})();
 
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;

@@ -53,7 +53,8 @@ export const AnyNull = runtime.AnyNull
 export const ModelName = {
   User: 'User',
   Session: 'Session',
-  File: 'File'
+  File: 'File',
+  UploadJob: 'UploadJob'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -118,6 +119,26 @@ export const FileScalarFieldEnum = {
 } as const
 
 export type FileScalarFieldEnum = (typeof FileScalarFieldEnum)[keyof typeof FileScalarFieldEnum]
+
+
+export const UploadJobScalarFieldEnum = {
+  id: 'id',
+  userId: 'userId',
+  fileName: 'fileName',
+  fileSize: 'fileSize',
+  tempFilePath: 'tempFilePath',
+  mimeType: 'mimeType',
+  status: 'status',
+  progress: 'progress',
+  uploadedBytes: 'uploadedBytes',
+  errorMessage: 'errorMessage',
+  retries: 'retries',
+  maxRetries: 'maxRetries',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type UploadJobScalarFieldEnum = (typeof UploadJobScalarFieldEnum)[keyof typeof UploadJobScalarFieldEnum]
 
 
 export const SortOrder = {
