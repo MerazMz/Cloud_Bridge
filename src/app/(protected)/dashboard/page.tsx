@@ -15,11 +15,42 @@ export interface DBFile {
   createdAt: string;
 }
 
+export interface AppNotification {
+  id: string;
+  type: "success" | "info" | "error";
+  message: string;
+  timestamp: string;
+  read: boolean;
+}
+
+function getRelativeTime(timestamp: string): string {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSecs = Math.floor(diffMs / 1000);
+  const diffMins = Math.floor(diffSecs / 60);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffSecs < 10) return "Just now";
+  if (diffSecs < 60) return `${diffSecs}s ago`;
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${diffDays}d ago`;
+}
+
 function DashboardContent() {
   const { user, loading, error } = useAuth();
   const { showToast } = useToast();
   const searchParams = useSearchParams();
   const tab = searchParams.get("tab") || "dashboard";
+
+  const formatAudioTime = (time: number) => {
+    if (isNaN(time)) return "0:00";
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${minutes}:${seconds < 10 ? "0" : ""}${seconds}`;
+  };
 
   const [files, setFiles] = useState<DBFile[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
@@ -29,11 +60,28 @@ function DashboardContent() {
   const [darkMode, setDarkMode] = useState(false);
   const [deletingIds, setDeletingIds] = useState<Record<string, boolean>>({});
   const [downloadingIds, setDownloadingIds] = useState<Record<string, boolean>>({});
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   // Client-side visual state features
   const [favorites, setFavorites] = useState<string[]>([]);
   const [sharedIds, setSharedIds] = useState<string[]>([]);
   const [selectedFolderCategory, setSelectedFolderCategory] = useState<string | null>(null);
+
+  // Preview states
+  const [previewFile, setPreviewFile] = useState<DBFile | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewTextContent, setPreviewTextContent] = useState<string | null>(null);
+  const [zoomScale, setZoomScale] = useState(1);
+  const [rotation, setRotation] = useState(0);
+
+  // Audio preview player states
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const [audioVolume, setAudioVolume] = useState(0.8);
 
   // Upload Progress and Cancel State
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -58,8 +106,41 @@ function DashboardContent() {
         const sh = localStorage.getItem("shared_ids");
         if (sh) setSharedIds(JSON.parse(sh));
       } catch {}
+
+      // Load notifications
+      try {
+        const notifs = localStorage.getItem("app_notifications");
+        if (notifs) {
+          setNotifications(JSON.parse(notifs));
+        } else {
+          const welcomeNotif: AppNotification = {
+            id: "welcome",
+            type: "info",
+            message: "Welcome to Cloud Bridge! Your secure Telegram-backed cloud drive is ready.",
+            timestamp: new Date().toISOString(),
+            read: false,
+          };
+          setNotifications([welcomeNotif]);
+          localStorage.setItem("app_notifications", JSON.stringify([welcomeNotif]));
+        }
+      } catch {}
     }
   }, []);
+
+  const addNotification = (type: "success" | "info" | "error", message: string) => {
+    const newNotif: AppNotification = {
+      id: Math.random().toString(36).substring(2, 9),
+      type,
+      message,
+      timestamp: new Date().toISOString(),
+      read: false,
+    };
+    setNotifications((prev) => {
+      const updated = [newNotif, ...prev].slice(0, 50); // limit to 50
+      localStorage.setItem("app_notifications", JSON.stringify(updated));
+      return updated;
+    });
+  };
 
   const toggleDarkMode = () => {
     const nextDark = !darkMode;
@@ -150,15 +231,19 @@ function DashboardContent() {
       const json = await uploadPromise;
       if (json.success) {
         showToast("success", `${file.name} uploaded successfully.`);
+        addNotification("success", `${file.name} uploaded successfully.`);
         setFiles((prev) => [json.data, ...prev]);
       } else {
         showToast("error", json.message || "Failed to upload file.");
+        addNotification("error", `Failed to upload ${file.name}: ${json.message || "Unknown error"}`);
       }
     } catch (err: any) {
       if (err.message === "Upload cancelled") {
         showToast("info", "Upload cancelled.");
+        addNotification("info", `Upload of ${file.name} was cancelled.`);
       } else {
         showToast("error", err.message || "An error occurred while uploading the file.");
+        addNotification("error", `Failed to upload ${file.name}: ${err.message}`);
       }
     } finally {
       setIsUploading(false);
@@ -193,8 +278,10 @@ function DashboardContent() {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
       showToast("success", `${fileName} downloaded successfully.`);
+      addNotification("success", `${fileName} downloaded successfully.`);
     } catch (err: any) {
       showToast("error", err.message || "Failed to download file.");
+      addNotification("error", `Failed to download ${fileName}: ${err.message}`);
     } finally {
       setDownloadingIds((prev) => ({ ...prev, [fileId]: false }));
     }
@@ -209,14 +296,17 @@ function DashboardContent() {
       const json = await res.json();
       if (json.success) {
         showToast("info", `${file.fileName} moved to trash.`);
+        addNotification("info", `${file.fileName} moved to trash.`);
         setFiles((prev) =>
           prev.map((f) => (f.id === file.id ? { ...f, isDeleted: true } : f))
         );
       } else {
         showToast("error", json.message || "Failed to move file to trash.");
+        addNotification("error", `Failed to move ${file.fileName} to trash: ${json.message}`);
       }
     } catch {
       showToast("error", "An error occurred while moving the file to trash.");
+      addNotification("error", `Failed to move ${file.fileName} to trash.`);
     }
   };
 
@@ -231,14 +321,17 @@ function DashboardContent() {
       const json = await res.json();
       if (json.success) {
         showToast("success", `${file.fileName} restored from trash.`);
+        addNotification("success", `${file.fileName} restored from trash.`);
         setFiles((prev) =>
           prev.map((f) => (f.id === file.id ? { ...f, isDeleted: false } : f))
         );
       } else {
         showToast("error", json.message || "Failed to restore file.");
+        addNotification("error", `Failed to restore ${file.fileName}: ${json.message}`);
       }
     } catch {
       showToast("error", "An error occurred while restoring the file.");
+      addNotification("error", `Failed to restore ${file.fileName}.`);
     }
   };
 
@@ -253,12 +346,15 @@ function DashboardContent() {
       const json = await res.json();
       if (json.success) {
         showToast("success", `${fileName} permanently deleted.`);
+        addNotification("success", `${fileName} permanently deleted.`);
         setFiles((prev) => prev.filter((f) => f.id !== fileId));
       } else {
         showToast("error", json.message || "Failed to delete file.");
+        addNotification("error", `Failed to delete ${fileName}: ${json.message}`);
       }
     } catch (err) {
       showToast("error", "An error occurred while deleting the file.");
+      addNotification("error", `Failed to delete ${fileName}.`);
     } finally {
       setDeletingIds((prev) => ({ ...prev, [fileId]: false }));
     }
@@ -277,6 +373,8 @@ function DashboardContent() {
       }
 
       showToast("success", "Shareable download link copied to clipboard!");
+      const fileObj = files.find((f) => f.id === fileId);
+      addNotification("success", `Copied download link for ${fileObj?.fileName || "file"}`);
     } catch (err) {
       showToast("error", "Failed to copy share link.");
     }
@@ -285,15 +383,77 @@ function DashboardContent() {
   // Toggle Favorite Star
   const handleToggleFavorite = (fileId: string) => {
     let nextFavorites: string[] = [];
+    const fileObj = files.find((f) => f.id === fileId);
+    const name = fileObj?.fileName || "File";
+
     if (favorites.includes(fileId)) {
       nextFavorites = favorites.filter((id) => id !== fileId);
       showToast("info", "Removed from favorites.");
+      addNotification("info", `Removed ${name} from favorites.`);
     } else {
       nextFavorites = [...favorites, fileId];
       showToast("success", "Added to favorites.");
+      addNotification("success", `Added ${name} to favorites.`);
     }
     setFavorites(nextFavorites);
     localStorage.setItem("favorites", JSON.stringify(nextFavorites));
+  };
+
+  const handleOpenPreview = async (file: DBFile) => {
+    setZoomScale(1);
+    setRotation(0);
+    setPreviewTextContent(null);
+    setPreviewFile(file);
+    setPreviewLoading(true);
+
+    if (previewUrl) {
+      window.URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(null);
+    }
+
+    try {
+      const res = await fetch(`/api/files/${file.id}?preview=true`);
+      if (!res.ok) {
+        throw new Error("Failed to load preview");
+      }
+
+      const isText =
+        file.mimeType.startsWith("text/") ||
+        file.fileName.endsWith(".txt") ||
+        file.fileName.endsWith(".json") ||
+        file.fileName.endsWith(".js") ||
+        file.fileName.endsWith(".ts") ||
+        file.fileName.endsWith(".css") ||
+        file.fileName.endsWith(".md");
+
+      if (isText) {
+        const text = await res.text();
+        setPreviewTextContent(text);
+      } else {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        setPreviewUrl(url);
+      }
+    } catch (err: any) {
+      showToast("error", err.message || "Failed to preview file.");
+      setPreviewFile(null);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleClosePreview = () => {
+    if (previewUrl) {
+      window.URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(null);
+    }
+    setPreviewFile(null);
+    setPreviewTextContent(null);
+    setZoomScale(1);
+    setRotation(0);
+    setIsAudioPlaying(false);
+    setAudioCurrentTime(0);
+    setAudioDuration(0);
   };
 
   // Drag and drop handlers
@@ -499,14 +659,15 @@ function DashboardContent() {
   const finalFilteredFiles = visibleFiles.filter((f) =>
     f.fileName.toLowerCase().includes(searchTerm.toLowerCase())
   );
+  const unreadCount = notifications.filter((n) => !n.read).length;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.75rem", width: "100%" }}>
       {/* Top Header Bar */}
       <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1.5rem", width: "100%" }}>
         {/* Search Bar */}
-        <div style={{ position: "relative", width: "380px" }}>
-          <span style={{ position: "absolute", left: "0.85rem", top: "50%", transform: "translateY(-50%)", fontSize: "0.95rem" }}>
+        <div style={{ position: "relative", width: "300px" }}>
+          <span style={{ position: "absolute", left: "0.85rem", top: "50%", transform: "translateY(-50%)", fontSize: "0.85rem" }}>
             🔍
           </span>
           <input
@@ -516,9 +677,9 @@ function DashboardContent() {
             onChange={(e) => setSearchTerm(e.target.value)}
             className="input-field"
             style={{
-              paddingLeft: "2.5rem",
-              borderRadius: "20px",
-              height: "44px",
+              paddingLeft: "2.3rem",
+              borderRadius: "18px",
+              height: "36px",
               border: "1px solid var(--border-default)",
               background: "var(--bg-card)",
             }}
@@ -526,23 +687,24 @@ function DashboardContent() {
         </div>
 
         {/* Action Widgets */}
-        <div style={{ display: "flex", alignItems: "center", gap: "1.25rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
           {/* Light/Dark Toggle */}
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <span style={{ fontSize: "1.1rem" }}>☀️</span>
-            <label className="theme-switch">
+          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+            <span style={{ fontSize: "1rem" }}>☀️</span>
+            <label className="theme-switch" style={{ width: "36px", height: "20px" }}>
               <input type="checkbox" checked={darkMode} onChange={toggleDarkMode} />
               <span className="slider"></span>
             </label>
-            <span style={{ fontSize: "1.1rem" }}>🌙</span>
+            <span style={{ fontSize: "1rem" }}>🌙</span>
           </div>
 
           {/* Notifications Bell */}
           <div
+            onClick={() => setShowNotifications(!showNotifications)}
             style={{
               position: "relative",
-              width: "40px",
-              height: "40px",
+              width: "34px",
+              height: "34px",
               borderRadius: "50%",
               background: "var(--bg-card)",
               border: "1px solid var(--border-default)",
@@ -550,37 +712,146 @@ function DashboardContent() {
               alignItems: "center",
               justifyContent: "center",
               cursor: "pointer",
-              fontSize: "1.1rem",
+              fontSize: "1rem",
             }}
           >
             🔔
-            <span
-              style={{
-                position: "absolute",
-                top: "-2px",
-                right: "-2px",
-                background: "var(--color-error)",
-                color: "white",
-                borderRadius: "50%",
-                width: "16px",
-                height: "16px",
-                fontSize: "0.65rem",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontWeight: 700,
-              }}
-            >
-              3
-            </span>
+            {unreadCount > 0 && (
+              <span
+                style={{
+                  position: "absolute",
+                  top: "-2px",
+                  right: "-2px",
+                  background: "var(--color-error)",
+                  color: "white",
+                  borderRadius: "50%",
+                  width: "14px",
+                  height: "14px",
+                  fontSize: "0.6rem",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontWeight: 700,
+                }}
+              >
+                {unreadCount}
+              </span>
+            )}
+
+            {/* Floating Dropdown Card */}
+            {showNotifications && (
+              <div
+                className="glass-card animate-fade-in"
+                onClick={(e) => e.stopPropagation()} // prevent closing when clicking inside
+                style={{
+                  position: "absolute",
+                  top: "40px",
+                  right: "0",
+                  width: "280px",
+                  maxHeight: "360px",
+                  overflowY: "auto",
+                  zIndex: 9999,
+                  padding: "0.75rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "0.6rem",
+                  boxShadow: "var(--glass-shadow)",
+                  background: "var(--bg-card)",
+                  borderRadius: "var(--radius-md)",
+                  border: "1px solid var(--border-default)",
+                  cursor: "default",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    borderBottom: "1px solid var(--border-default)",
+                    paddingBottom: "0.5rem",
+                  }}
+                >
+                  <span style={{ fontWeight: 700, fontSize: "0.85rem" }}>Notifications</span>
+                  {unreadCount > 0 && (
+                    <button
+                      onClick={() => {
+                        const updated = notifications.map((n) => ({ ...n, read: true }));
+                        setNotifications(updated);
+                        localStorage.setItem("app_notifications", JSON.stringify(updated));
+                        showToast("info", "Marked all as read");
+                      }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "var(--color-primary)",
+                        fontSize: "0.75rem",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Mark all read
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  {notifications.map((n) => (
+                    <div
+                      key={n.id}
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "0.15rem",
+                        padding: "0.5rem",
+                        borderRadius: "var(--radius-sm)",
+                        background: n.read ? "transparent" : "var(--color-primary-glow)",
+                        borderLeft: `3px solid ${
+                          n.type === "success"
+                            ? "var(--color-success)"
+                            : n.type === "error"
+                            ? "var(--color-error)"
+                            : "var(--color-primary)"
+                        }`,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: "0.8rem",
+                          color: "var(--text-primary)",
+                          fontWeight: n.read ? 400 : 600,
+                          textAlign: "left",
+                        }}
+                      >
+                        {n.message}
+                      </span>
+                      <span style={{ fontSize: "0.65rem", color: "var(--text-muted)", textAlign: "left" }}>
+                        {getRelativeTime(n.timestamp)}
+                      </span>
+                    </div>
+                  ))}
+                  {notifications.length === 0 && (
+                    <span
+                      style={{
+                        fontSize: "0.8rem",
+                        color: "var(--text-muted)",
+                        textAlign: "center",
+                        padding: "1.5rem 0",
+                      }}
+                    >
+                      No notifications yet
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Profile Circle Dropdown */}
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", cursor: "pointer" }}>
             <div
               style={{
-                width: "40px",
-                height: "40px",
+                width: "34px",
+                height: "34px",
                 borderRadius: "50%",
                 background: "linear-gradient(135deg, #a855f7, #6366f1)",
                 color: "white",
@@ -588,12 +859,13 @@ function DashboardContent() {
                 alignItems: "center",
                 justifyContent: "center",
                 fontWeight: 700,
+                fontSize: "0.9rem",
                 textTransform: "uppercase",
               }}
             >
               {userName.slice(0, 1)}
             </div>
-            <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>▼</span>
+            <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>▼</span>
           </div>
         </div>
       </header>
@@ -1068,6 +1340,508 @@ function DashboardContent() {
           </div>
         </div>
       )}
+
+      {/* Premium Glassmorphic Preview Lightbox Modal */}
+      {previewFile && (
+        <div
+          onClick={handleClosePreview}
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 11000,
+            background: "rgba(0, 0, 0, 0.65)",
+            backdropFilter: "blur(12px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "2rem",
+            animation: "fadeIn 0.25s ease-out",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()} // Click inside modal doesn't close it
+            className="glass-card animate-scale-up"
+            style={{
+              position: "relative",
+              width: "100%",
+              maxWidth: "850px",
+              height: "85%",
+              maxHeight: "680px",
+              background: "var(--bg-card)",
+              border: "1px solid var(--border-default)",
+              borderRadius: "var(--radius-lg)",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.4)",
+            }}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "1rem 1.25rem",
+                borderBottom: "1px solid var(--border-default)",
+                background: "rgba(0,0,0,0.02)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", overflow: "hidden" }}>
+                <span style={{ fontSize: "1.25rem" }}>
+                  {getFileStyle(previewFile.mimeType, previewFile.fileName).emoji}
+                </span>
+                <div style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                  <span
+                    style={{
+                      fontWeight: 700,
+                      fontSize: "0.95rem",
+                      color: "var(--text-primary)",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                    title={previewFile.fileName}
+                  >
+                    {previewFile.fileName}
+                  </span>
+                  <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                    {formatBytes(previewFile.fileSize)} • {previewFile.mimeType}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <button
+                  onClick={() => handleDownload(previewFile.id, previewFile.fileName)}
+                  className="btn btn-secondary"
+                  style={{
+                    padding: "0.35rem 0.75rem",
+                    fontSize: "0.75rem",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.35rem",
+                    borderRadius: "14px",
+                  }}
+                >
+                  ⬇️ Download
+                </button>
+                <button
+                  onClick={handleClosePreview}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    fontSize: "1.2rem",
+                    cursor: "pointer",
+                    padding: "0.2rem",
+                    color: "var(--text-muted)",
+                  }}
+                  title="Close Preview"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div
+              style={{
+                flex: 1,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "rgba(0,0,0,0.03)",
+                overflow: "hidden",
+                position: "relative",
+                padding: previewFile.mimeType.startsWith("image/") ? "0" : "1.5rem",
+              }}
+            >
+              {previewLoading ? (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem" }}>
+                  <LoadingSpinner size="lg" label="Decrypting secure Telegram media stream..." />
+                </div>
+              ) : (
+                <>
+                  {/* Image Viewer */}
+                  {previewFile.mimeType.startsWith("image/") && previewUrl && (
+                    <div
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        overflow: "hidden",
+                        position: "relative",
+                      }}
+                    >
+                      <div
+                        style={{
+                          transform: `scale(${zoomScale}) rotate(${rotation}deg)`,
+                          transition: "transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          maxWidth: "100%",
+                          maxHeight: "100%",
+                        }}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={previewUrl}
+                          alt={previewFile.fileName}
+                          style={{
+                            maxWidth: "100%",
+                            maxHeight: "100%",
+                            objectFit: "contain",
+                            boxShadow: "0 10px 25px rgba(0,0,0,0.15)",
+                            borderRadius: "4px",
+                          }}
+                        />
+                      </div>
+
+                      {/* Image Toolbar Floating Controls */}
+                      <div
+                        style={{
+                          position: "absolute",
+                          bottom: "1.5rem",
+                          left: "50%",
+                          transform: "translateX(-50%)",
+                          background: "var(--bg-card)",
+                          border: "1px solid var(--border-default)",
+                          borderRadius: "20px",
+                          padding: "0.4rem 1rem",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "1rem",
+                          boxShadow: "0 4px 15px rgba(0,0,0,0.1)",
+                          zIndex: 10,
+                        }}
+                      >
+                        <button
+                          onClick={() => setZoomScale((z) => Math.max(0.5, z - 0.25))}
+                          style={{ background: "none", border: "none", cursor: "pointer", fontSize: "1rem" }}
+                          title="Zoom Out"
+                        >
+                          ➖
+                        </button>
+                        <span style={{ fontSize: "0.8rem", fontWeight: 600, minWidth: "35px", textAlign: "center" }}>
+                          {Math.round(zoomScale * 100)}%
+                        </span>
+                        <button
+                          onClick={() => setZoomScale((z) => Math.min(4, z + 0.25))}
+                          style={{ background: "none", border: "none", cursor: "pointer", fontSize: "1rem" }}
+                          title="Zoom In"
+                        >
+                          ➕
+                        </button>
+                        <div style={{ width: "1px", height: "14px", background: "var(--border-default)" }} />
+                        <button
+                          onClick={() => setRotation((r) => (r - 90) % 360)}
+                          style={{ background: "none", border: "none", cursor: "pointer", fontSize: "0.95rem" }}
+                          title="Rotate Left"
+                        >
+                          ⟲
+                        </button>
+                        <button
+                          onClick={() => setRotation((r) => (r + 90) % 360)}
+                          style={{ background: "none", border: "none", cursor: "pointer", fontSize: "0.95rem" }}
+                          title="Rotate Right"
+                        >
+                          ⟳
+                        </button>
+                        <div style={{ width: "1px", height: "14px", background: "var(--border-default)" }} />
+                        <button
+                          onClick={() => {
+                            setZoomScale(1);
+                            setRotation(0);
+                          }}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            fontSize: "0.75rem",
+                            fontWeight: 600,
+                            color: "var(--color-primary)",
+                          }}
+                        >
+                          Reset
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Video Streaming Player */}
+                  {previewFile.mimeType.startsWith("video/") && previewUrl && (
+                    <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <video
+                        controls
+                        src={previewUrl}
+                        autoPlay
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          maxHeight: "450px",
+                          borderRadius: "var(--radius-md)",
+                          boxShadow: "0 10px 35px rgba(0,0,0,0.3)",
+                          background: "#000",
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {/* Premium Custom Audio Player */}
+                  {previewFile.mimeType.startsWith("audio/") && previewUrl && (
+                    <div
+                      style={{
+                        width: "100%",
+                        maxWidth: "420px",
+                        padding: "2rem",
+                        background: "var(--bg-card)",
+                        borderRadius: "var(--radius-lg)",
+                        border: "1px solid var(--border-default)",
+                        boxShadow: "var(--glass-shadow)",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: "1.5rem",
+                      }}
+                    >
+                      {/* Spinning Vinyl Record Disk representation */}
+                      <div
+                        style={{
+                          width: "120px",
+                          height: "120px",
+                          borderRadius: "50%",
+                          background: "radial-gradient(circle, #334155 30%, #0f172a 70%)",
+                          border: "4px solid var(--border-default)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
+                          animation: isAudioPlaying ? "spin 4s linear infinite" : "none",
+                          position: "relative",
+                        }}
+                      >
+                        <span style={{ fontSize: "2.5rem" }}>🎵</span>
+                        <div
+                          style={{
+                            position: "absolute",
+                            width: "12px",
+                            height: "12px",
+                            borderRadius: "50%",
+                            background: "var(--bg-card)",
+                            border: "2px solid var(--border-default)",
+                          }}
+                        />
+                      </div>
+
+                      <div style={{ width: "100%", textAlign: "center" }}>
+                        <h4
+                          style={{
+                            fontSize: "0.95rem",
+                            fontWeight: 700,
+                            color: "var(--text-primary)",
+                            margin: 0,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {previewFile.fileName}
+                        </h4>
+                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.2rem", display: "inline-block" }}>
+                          Telegram Audio Stream
+                        </span>
+                      </div>
+
+                      {/* Hidden HTML5 Audio tag */}
+                      <audio
+                        ref={audioRef}
+                        src={previewUrl}
+                        onTimeUpdate={() => {
+                          if (audioRef.current) {
+                            setAudioCurrentTime(audioRef.current.currentTime);
+                          }
+                        }}
+                        onLoadedMetadata={() => {
+                          if (audioRef.current) {
+                            setAudioDuration(audioRef.current.duration);
+                          }
+                        }}
+                        onEnded={() => {
+                          setIsAudioPlaying(false);
+                          setAudioCurrentTime(0);
+                        }}
+                      />
+
+                      {/* Player Progress Slider */}
+                      <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: "0.3rem" }}>
+                        <input
+                          type="range"
+                          min={0}
+                          max={audioDuration || 100}
+                          value={audioCurrentTime}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            setAudioCurrentTime(val);
+                            if (audioRef.current) {
+                              audioRef.current.currentTime = val;
+                            }
+                          }}
+                          style={{ width: "100%", accentColor: "var(--color-primary)", cursor: "pointer" }}
+                        />
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                          <span>{formatAudioTime(audioCurrentTime)}</span>
+                          <span>{formatAudioTime(audioDuration)}</span>
+                        </div>
+                      </div>
+
+                      {/* Controls Bar: Prev, Play/Pause, Vol */}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+                        {/* Volume controls */}
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", width: "30%" }}>
+                          <span style={{ fontSize: "0.9rem" }}>{audioVolume === 0 ? "🔇" : audioVolume < 0.5 ? "🔉" : "🔊"}</span>
+                          <input
+                            type="range"
+                            min={0}
+                            max={1}
+                            step={0.05}
+                            value={audioVolume}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              setAudioVolume(val);
+                              if (audioRef.current) {
+                                audioRef.current.volume = val;
+                              }
+                            }}
+                            style={{ width: "50px", accentColor: "var(--color-primary)", cursor: "pointer" }}
+                          />
+                        </div>
+
+                        {/* Central Play button */}
+                        <button
+                          onClick={() => {
+                            if (audioRef.current) {
+                              if (isAudioPlaying) {
+                                audioRef.current.pause();
+                              } else {
+                                audioRef.current.play();
+                              }
+                              setIsAudioPlaying(!isAudioPlaying);
+                            }
+                          }}
+                          style={{
+                            width: "42px",
+                            height: "42px",
+                            borderRadius: "50%",
+                            background: "var(--color-primary)",
+                            border: "none",
+                            color: "white",
+                            fontSize: "1.1rem",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            boxShadow: "0 4px 10px rgba(99, 102, 241, 0.3)",
+                          }}
+                        >
+                          {isAudioPlaying ? "⏸️" : "▶️"}
+                        </button>
+
+                        <div style={{ width: "30%" }} /> {/* Spacer */}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Inline PDF / Doc Frame Viewer */}
+                  {previewFile.mimeType === "application/pdf" && previewUrl && (
+                    <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column" }}>
+                      <iframe
+                        src={previewUrl}
+                        title={previewFile.fileName}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          border: "none",
+                          borderRadius: "var(--radius-sm)",
+                          background: "#fff",
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {/* Mono-spaced Code / Text Viewer */}
+                  {previewTextContent !== null && (
+                    <div
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        maxHeight: "450px",
+                        background: "#1e1e2e",
+                        border: "1px solid var(--border-default)",
+                        borderRadius: "var(--radius-sm)",
+                        padding: "1rem",
+                        overflow: "auto",
+                        textAlign: "left",
+                      }}
+                    >
+                      <pre
+                        style={{
+                          fontFamily: "Fira Code, Source Code Pro, monospace",
+                          fontSize: "0.8rem",
+                          lineHeight: "1.4",
+                          color: "#cdd6f4",
+                          margin: 0,
+                          whiteSpace: "pre-wrap",
+                        }}
+                      >
+                        {previewTextContent}
+                      </pre>
+                    </div>
+                  )}
+
+                  {/* Fallback for Unsupported File Types */}
+                  {!previewFile.mimeType.startsWith("image/") &&
+                    !previewFile.mimeType.startsWith("video/") &&
+                    !previewFile.mimeType.startsWith("audio/") &&
+                    previewFile.mimeType !== "application/pdf" &&
+                    previewTextContent === null && (
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          gap: "1rem",
+                          textAlign: "center",
+                          padding: "2rem",
+                        }}
+                      >
+                        <span style={{ fontSize: "3rem" }}>📦</span>
+                        <h4 style={{ fontSize: "1rem", fontWeight: 700, margin: 0 }}>
+                          No Direct Preview Available
+                        </h4>
+                        <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", maxWidth: "320px" }}>
+                          Previewing this file type is not supported in the browser. You can still download it directly.
+                        </p>
+                        <button
+                          onClick={() => handleDownload(previewFile.id, previewFile.fileName)}
+                          className="btn btn-primary"
+                          style={{ marginTop: "0.5rem" }}
+                        >
+                          Download Now
+                        </button>
+                      </div>
+                    )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -1171,6 +1945,13 @@ function DashboardContent() {
                 {/* Actions */}
                 <td style={{ padding: "0.75rem 0.5rem", textAlign: "right" }}>
                   <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+                    <button
+                      onClick={() => handleOpenPreview(file)}
+                      style={{ background: "none", border: "none", cursor: "pointer", fontSize: "0.95rem" }}
+                      title="Preview File"
+                    >
+                      👁️
+                    </button>
                     <button
                       disabled={isDownloading}
                       onClick={() => handleShare(file.id)}

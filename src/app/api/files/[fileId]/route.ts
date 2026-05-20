@@ -64,15 +64,21 @@ export async function GET(
       file.telegramMessageId
     );
 
-    // Return the file content with standard download headers
+    // Read query parameters
+    const urlParams = new URL(request.url);
+    const isPreview = urlParams.searchParams.get("preview") === "true";
+
+    const contentDisposition = isPreview
+      ? "inline"
+      : `attachment; filename="${encodeURIComponent(file.fileName)}"`;
+
+    // Return the file content with standard headers
     return new NextResponse(fileBuffer as any, {
       status: 200,
       headers: {
         "Content-Type": file.mimeType,
         "Content-Length": fileBuffer.length.toString(),
-        "Content-Disposition": `attachment; filename="${encodeURIComponent(
-          file.fileName
-        )}"`,
+        "Content-Disposition": contentDisposition,
       },
     });
   } catch (error) {
@@ -217,7 +223,18 @@ export async function PATCH(
     });
 
     log.info("File status updated", { fileId, isDeleted });
-    return successResponse(updatedFile, "File updated successfully.");
+
+    return successResponse(
+      {
+        id: updatedFile.id,
+        fileName: updatedFile.fileName,
+        fileSize: Number(updatedFile.fileSize),
+        mimeType: updatedFile.mimeType,
+        isDeleted: updatedFile.isDeleted,
+        createdAt: updatedFile.createdAt.toISOString(),
+      },
+      "File updated successfully."
+    );
   } catch (error) {
     log.error("Failed to update file", error);
     return errorResponse("Failed to update file.", 500);
