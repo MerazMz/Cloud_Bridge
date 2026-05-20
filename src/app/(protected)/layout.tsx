@@ -12,6 +12,29 @@ function LayoutWithSidebarContent({ children }: { children: React.ReactNode }) {
   const tab = searchParams.get("tab") || "dashboard";
   const [totalSize, setTotalSize] = useState(0);
 
+  // States for dual logout confirmation and 10 second countdown timer
+  const [logoutStep, setLogoutStep] = useState<"none" | "confirm" | "countdown">("none");
+  const [logoutCountdown, setLogoutCountdown] = useState(10);
+
+  // Effect to handle countdown tick and logout execution
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (logoutStep === "countdown") {
+      setLogoutCountdown(10);
+      interval = setInterval(() => {
+        setLogoutCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(interval);
+            logout();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [logoutStep, logout]);
+
   // Fetch files to update sidebar storage progress bar
   useEffect(() => {
     if (user) {
@@ -49,71 +72,71 @@ function LayoutWithSidebarContent({ children }: { children: React.ReactNode }) {
       {/* Sidebar */}
       <aside className="app-sidebar">
         {/* Logo */}
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: "2rem" }}>
-          <svg width="64" height="64" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path
-              d="M30 68C20 68 15 60 15 51C15 42 22 35 32 35C35 25 45 17 57 17C71 17 82 27 84 40C91 41 96 47 96 54C96 62 90 68 80 68H30Z"
-              stroke="url(#logo-grad)"
-              strokeWidth="5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <path d="M22 68C35 53 65 53 78 68" stroke="url(#logo-grad)" strokeWidth="3" strokeDasharray="3 3" />
-            <line x1="38" y1="48" x2="38" y2="68" stroke="url(#logo-grad)" strokeWidth="3" />
-            <line x1="62" y1="48" x2="62" y2="68" stroke="url(#logo-grad)" strokeWidth="3" />
-            <line x1="18" y1="68" x2="82" y2="68" stroke="url(#logo-grad)" strokeWidth="5" />
-            <path d="M48 38L62 29L55 45L52 38L48 38Z" fill="url(#logo-grad)" />
-            <defs>
-              <linearGradient id="logo-grad" x1="15" y1="17" x2="96" y2="68" gradientUnits="userSpaceOnUse">
-                <stop stopColor="#6366F1" />
-                <stop offset="1" stopColor="#06B6D4" />
-              </linearGradient>
-            </defs>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", paddingLeft: "0.5rem", marginBottom: "2.5rem" }}>
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 15V9M12 9L9 12M12 9L15 12" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
-          <span
-            style={{
-              fontSize: "1.1rem",
-              fontWeight: 800,
-              letterSpacing: "0.08em",
-              background: "linear-gradient(135deg, #4f46e5, #06b6d4)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              marginTop: "0.5rem",
-              textTransform: "uppercase",
-            }}
-          >
-            Cloud Bridge
+          <span style={{ fontSize: "1.45rem", fontWeight: 800, letterSpacing: "-0.03em", color: "var(--text-primary)", display: "flex", alignItems: "center" }}>
+            Cloud<span style={{ color: "#F59E0B" }}>Bridge</span>
           </span>
         </div>
 
         {/* Navigation links */}
-        <nav style={{ display: "flex", flexDirection: "column", gap: "0.4rem", flex: 1 }}>
+        <nav style={{ display: "flex", flexDirection: "column", gap: "0.35rem", flex: 1 }}>
           <Link href="/dashboard?tab=dashboard" className={`nav-link ${tab === "dashboard" ? "active" : ""}`}>
-            <span style={{ fontSize: "1.1rem" }}>🏠</span>
+            <svg style={{ width: "1.15rem", height: "1.15rem", flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1"/>
+              <rect x="14" y="3" width="7" height="7" rx="1"/>
+              <rect x="14" y="14" width="7" height="7" rx="1"/>
+              <rect x="3" y="14" width="7" height="7" rx="1"/>
+            </svg>
             <span>Dashboard</span>
           </Link>
           <Link href="/dashboard?tab=my-files" className={`nav-link ${tab === "my-files" ? "active" : ""}`}>
-            <span style={{ fontSize: "1.1rem" }}>📁</span>
+            <svg style={{ width: "1.15rem", height: "1.15rem", flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
             <span>My Files</span>
           </Link>
+          <Link href="/dashboard?tab=uploads" className={`nav-link ${tab === "uploads" ? "active" : ""}`}>
+            <svg style={{ width: "1.15rem", height: "1.15rem", flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
+            </svg>
+            <span>Uploads</span>
+          </Link>
           <Link href="/dashboard?tab=folders" className={`nav-link ${tab === "folders" ? "active" : ""}`}>
-            <span style={{ fontSize: "1.1rem" }}>📂</span>
+            <svg style={{ width: "1.15rem", height: "1.15rem", flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
             <span>Folders</span>
           </Link>
           <Link href="/dashboard?tab=recent" className={`nav-link ${tab === "recent" ? "active" : ""}`}>
-            <span style={{ fontSize: "1.1rem" }}>🕒</span>
+            <svg style={{ width: "1.15rem", height: "1.15rem", flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
             <span>Recent</span>
           </Link>
           <Link href="/dashboard?tab=favorites" className={`nav-link ${tab === "favorites" ? "active" : ""}`}>
-            <span style={{ fontSize: "1.1rem" }}>⭐</span>
+            <svg style={{ width: "1.15rem", height: "1.15rem", flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+            </svg>
             <span>Favorites</span>
           </Link>
           <Link href="/dashboard?tab=shared" className={`nav-link ${tab === "shared" ? "active" : ""}`}>
-            <span style={{ fontSize: "1.1rem" }}>👥</span>
+            <svg style={{ width: "1.15rem", height: "1.15rem", flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
             <span>Shared with me</span>
           </Link>
           <Link href="/dashboard?tab=trash" className={`nav-link ${tab === "trash" ? "active" : ""}`}>
-            <span style={{ fontSize: "1.1rem" }}>🗑️</span>
+            <svg style={{ width: "1.15rem", height: "1.15rem", flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+            </svg>
             <span>Trash</span>
           </Link>
         </nav>
@@ -127,15 +150,17 @@ function LayoutWithSidebarContent({ children }: { children: React.ReactNode }) {
             display: "flex",
             flexDirection: "column",
             gap: "0.75rem",
-            background: "rgba(99, 102, 241, 0.03)",
+            borderRadius: "16px",
+            border: "1px solid var(--border-default)",
+            background: "transparent",
           }}
         >
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-            <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text-primary)" }}>
-              Storage Usage
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+            <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-secondary)", letterSpacing: "-0.01em" }}>
+              Storage Used
             </span>
-            <span style={{ fontSize: "0.85rem", color: "var(--text-secondary)", fontWeight: 600 }}>
-              {usedGB} GB <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>/ {limitGB} GB</span>
+            <span style={{ fontSize: "1.05rem", color: "var(--text-primary)", fontWeight: 700, letterSpacing: "-0.02em" }}>
+              {usedGB} GB <span style={{ fontWeight: 500, color: "var(--text-muted)" }}>/ {limitGB} GB</span>
             </span>
           </div>
 
@@ -143,8 +168,8 @@ function LayoutWithSidebarContent({ children }: { children: React.ReactNode }) {
             style={{
               width: "100%",
               height: "6px",
-              background: "var(--border-default)",
-              borderRadius: "3px",
+              background: "var(--bg-secondary)",
+              borderRadius: "9999px",
               overflow: "hidden",
             }}
           >
@@ -152,30 +177,38 @@ function LayoutWithSidebarContent({ children }: { children: React.ReactNode }) {
               style={{
                 width: `${usagePercent}%`,
                 height: "100%",
-                background: "linear-gradient(90deg, #6366f1, #06b6d4)",
-                borderRadius: "3px",
+                background: "#F59E0B",
+                borderRadius: "9999px",
               }}
             />
           </div>
-          <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-            {usagePercent}% Used
+          <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 500 }}>
+            {usagePercent}% used
           </span>
 
           <button
-            className="btn btn-primary"
+            className="btn"
             style={{
-              padding: "0.5rem",
-              fontSize: "0.8rem",
-              background: "linear-gradient(135deg, #6366f1, #4f46e5)",
-              color: "white",
-              borderRadius: "var(--radius-sm)",
-              fontWeight: 600,
+              padding: "0.55rem",
+              fontSize: "0.85rem",
+              background: "#F59E0B",
+              color: "#ffffff",
+              borderRadius: "8px",
+              fontWeight: 700,
               width: "100%",
               marginTop: "0.25rem",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "0.4rem",
+              boxShadow: "0 2px 6px rgba(245, 158, 11, 0.2)",
             }}
             onClick={() => alert("Premium plans coming soon!")}
           >
-            ⚡ Upgrade Plan
+            <svg style={{ width: "0.95rem", height: "0.95rem" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M2 4l3 12h14l3-12-6 7-4-7-4 7-6-7z"/>
+            </svg>
+            Upgrade Plan
           </button>
         </div>
 
@@ -186,7 +219,7 @@ function LayoutWithSidebarContent({ children }: { children: React.ReactNode }) {
             alignItems: "center",
             gap: "0.75rem",
             paddingTop: "1rem",
-            borderTop: "1px solid var(--border-default)",
+            borderTop: "1px solid var(--border-subtle)",
           }}
         >
           <div
@@ -194,63 +227,226 @@ function LayoutWithSidebarContent({ children }: { children: React.ReactNode }) {
               width: "40px",
               height: "40px",
               borderRadius: "50%",
-              background: "linear-gradient(135deg, #6366f1, #06b6d4)",
+              background: "#F59E0B",
               color: "white",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               fontWeight: 700,
-              fontSize: "0.95rem",
-              boxShadow: "0 2px 8px var(--color-primary-glow)",
+              fontSize: "1rem",
               textTransform: "uppercase",
             }}
           >
-            {userInitials}
+            {userInitials[0] || "U"}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <p
               style={{
-                fontSize: "0.85rem",
-                fontWeight: 600,
+                fontSize: "0.9rem",
+                fontWeight: 700,
                 color: "var(--text-primary)",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
+                letterSpacing: "-0.015em",
               }}
             >
               {userName}
             </p>
             <p
               style={{
-                fontSize: "0.75rem",
+                fontSize: "0.78rem",
                 color: "var(--text-muted)",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
+                letterSpacing: "-0.01em",
               }}
             >
-              {user.username ? `@${user.username}` : user.phoneNumber}
+              {user.username ? `${user.username}` : "chapri@example.com"}
             </p>
           </div>
           <button
-            onClick={logout}
+            onClick={() => setLogoutStep("confirm")}
             style={{
               background: "none",
               border: "none",
               cursor: "pointer",
-              fontSize: "1.1rem",
-              color: "var(--text-muted)",
               padding: "0.25rem",
+              display: "flex",
+              alignItems: "center",
+              color: "var(--text-muted)",
+              transition: "color 0.15s ease",
             }}
             title="Logout"
+            className="dropdown-item-hover"
           >
-            ↩
+            <svg style={{ width: "1.15rem", height: "1.15rem" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+            </svg>
           </button>
         </div>
       </aside>
 
       {/* Main viewport */}
       <main className="app-main">{children}</main>
+
+      {/* Logout Dual Confirmation Modal Overlay */}
+      {logoutStep !== "none" && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.4)",
+            backdropFilter: "blur(8px)",
+            zIndex: 999999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "1rem",
+            animation: "fadeIn 0.2s ease-out",
+          }}
+        >
+          <div
+            className="glass-card"
+            style={{
+              width: "380px",
+              background: "var(--bg-card)",
+              border: "1px solid var(--border-default)",
+              borderRadius: "14px",
+              padding: "1.5rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: "1.25rem",
+              boxShadow: "var(--glass-shadow)",
+              textAlign: "center",
+              fontFamily: "Outfit, sans-serif",
+            }}
+          >
+            {/* Warning / Timer Header Icon */}
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <div
+                style={{
+                  width: "48px",
+                  height: "48px",
+                  borderRadius: "50%",
+                  background: logoutStep === "confirm" ? "rgba(239, 68, 68, 0.1)" : "rgba(245, 158, 11, 0.1)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: logoutStep === "confirm" ? "#EF4444" : "#F59E0B",
+                }}
+              >
+                {logoutStep === "confirm" ? (
+                  <svg style={{ width: "1.5rem", height: "1.5rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                ) : (
+                  <svg style={{ width: "1.5rem", height: "1.5rem" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <polyline points="12 6 12 12 16 14"/>
+                  </svg>
+                )}
+              </div>
+            </div>
+
+            {logoutStep === "confirm" ? (
+              <>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                  <h3 style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.02em", margin: 0 }}>
+                    Are you sure you want to logout?
+                  </h3>
+                  <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", fontWeight: 500, margin: 0, lineHeight: "1.4" }}>
+                    You will need to re-authenticate with your credentials to access your secure CloudBridge vault.
+                  </p>
+                </div>
+
+                <div style={{ display: "flex", gap: "0.75rem", width: "100%" }}>
+                  <button
+                    onClick={() => setLogoutStep("none")}
+                    style={{
+                      flex: 1,
+                      padding: "0.65rem",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border-default)",
+                      background: "var(--bg-secondary)",
+                      color: "var(--text-primary)",
+                      fontWeight: 700,
+                      fontSize: "0.85rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => setLogoutStep("countdown")}
+                    style={{
+                      flex: 1,
+                      padding: "0.65rem",
+                      borderRadius: "8px",
+                      background: "#EF4444",
+                      color: "#ffffff",
+                      border: "none",
+                      fontWeight: 700,
+                      fontSize: "0.85rem",
+                      cursor: "pointer",
+                      boxShadow: "0 2px 6px rgba(239, 68, 68, 0.2)",
+                    }}
+                  >
+                    Yes, Logout
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  <h3 style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.02em", margin: 0 }}>
+                    Logging you out...
+                  </h3>
+                  <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", fontWeight: 500, margin: 0 }}>
+                    Securely closing your active session in
+                  </p>
+                  <div
+                    style={{
+                      fontSize: "3.5rem",
+                      fontWeight: 900,
+                      color: "#F59E0B",
+                      lineHeight: 1,
+                      margin: "0.5rem 0",
+                      letterSpacing: "-0.04em",
+                    }}
+                  >
+                    {logoutCountdown}
+                  </div>
+                  <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 500, margin: 0 }}>
+                    seconds
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setLogoutStep("none")}
+                  style={{
+                    width: "100%",
+                    padding: "0.65rem",
+                    borderRadius: "8px",
+                    border: "1px solid var(--border-default)",
+                    background: "var(--bg-secondary)",
+                    color: "var(--text-primary)",
+                    fontWeight: 700,
+                    fontSize: "0.85rem",
+                    cursor: "pointer",
+                  }}
+                >
+                  Click to Cancel
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

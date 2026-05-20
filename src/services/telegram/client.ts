@@ -26,7 +26,7 @@ export function createTelegramClient(sessionString = ""): TelegramClient {
 
   const client = new TelegramClient(session, apiId, apiHash, {
     connection: ConnectionTCPObfuscated,
-    useWSS: true, // Forces port 443 instead of port 80
+    useWSS: false, // Disable WebSocket overhead in Node.js server; use raw high-speed TCP socket connection
     connectionRetries: 5,
     retryDelay: 1000,
     autoReconnect: true,

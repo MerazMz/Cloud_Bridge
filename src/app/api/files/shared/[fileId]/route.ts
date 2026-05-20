@@ -74,7 +74,7 @@ export async function GET(
         "Content-Disposition": `${disposition}; filename="${encodeURIComponent(
           file.fileName
         )}"`,
-        "Cache-Control": "public, max-age=3600", // cache shared file for 1 hour
+        "Cache-Control": "public, max-age=31536000, immutable",
       },
     });
   } catch (error) {

@@ -38,8 +38,11 @@ export async function uploadToTelegramStream(options: UploadOptions): Promise<an
     const partSize = 512 * KB_TO_BYTES;
     const partCount = Math.floor((fileSize + partSize - 1) / partSize);
 
-    // Make sure MTProto client sender is ready
-    await client.getSender(client.session.dcId);
+    // Make sure MTProto client senders are ready for all clients in the pool
+    const clients = Array.isArray(client) ? client : [client];
+    for (const c of clients) {
+      await c.getSender(c.session.dcId);
+    }
 
     let uploadedBytes = 0;
     const startTime = Date.now();
@@ -77,8 +80,8 @@ export async function uploadToTelegramStream(options: UploadOptions): Promise<an
             currentChunkSize = fileSize - chunkStart;
           }
 
-          // Pre-allocate buffer and read chunk from disk directly
-          const chunkBuffer = Buffer.alloc(currentChunkSize);
+          // Use Buffer.allocUnsafe for zero-overhead fast memory allocation since we overwrite it immediately
+          const chunkBuffer = Buffer.allocUnsafe(currentChunkSize);
           await fHandle.read(chunkBuffer, 0, currentChunkSize, chunkStart);
 
           // Upload loop with retry logic
@@ -88,7 +91,10 @@ export async function uploadToTelegramStream(options: UploadOptions): Promise<an
                 if (hasFailed) return;
                 let sender;
                 try {
-                  sender = await client.getSender(client.session.dcId);
+                  // Round-robin alternate among the available Telegram client TCP connections in the pool
+                  // to completely bypass the single-connection speed limits and multiply throughput!
+                  const activeClient = clients[j % clients.length];
+                  sender = await activeClient.getSender(activeClient.session.dcId);
                   await sender.send(
                     isLarge
                       ? new Api.upload.SaveBigFilePart({

@@ -39,5 +39,14 @@ class ProgressBroadcaster {
   }
 }
 
-// Global Singleton progress broadcaster
-export const progressBroadcaster = new ProgressBroadcaster();
+// Define global interface for typescript
+declare global {
+  var progressBroadcaster: ProgressBroadcaster | undefined;
+}
+
+// Global Singleton progress broadcaster using globalThis pattern to avoid duplication in Next.js dev server
+export const progressBroadcaster = globalThis.progressBroadcaster || new ProgressBroadcaster();
+
+if (process.env.NODE_ENV !== "production") {
+  globalThis.progressBroadcaster = progressBroadcaster;
+}

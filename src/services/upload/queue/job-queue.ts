@@ -9,46 +9,27 @@ export interface CreateJobParams {
   userId: string;
   fileName: string;
   fileSize: number;
-  mimeType: string;
   tempFilePath: string;
+  parentId?: string;
 }
 
 export class UploadJobQueue {
   /**
-   * Safe getter that dynamically recovers from stale Next.js in-memory cached Prisma client singletons.
-   */
-  private static get db() {
-    let client = prisma;
-    if (client && !(client as any).uploadJob) {
-      log.warn("Stale cached database client detected. Dynamically purging cache and re-initializing...");
-      const globalForPrisma = globalThis as any;
-      if (globalForPrisma.prisma) {
-        delete globalForPrisma.prisma;
-      }
-      try {
-        const { prisma: freshPrisma } = require("@/lib/prisma");
-        client = freshPrisma;
-      } catch {}
-    }
-    return client.uploadJob;
-  }
-
-  /**
    * Register a new upload job in the queue database.
    */
   static async createJob(params: CreateJobParams) {
-    const job = await this.db.create({
+    const job = await prisma.uploadJob.create({
       data: {
         userId: params.userId,
         fileName: params.fileName,
         fileSize: BigInt(params.fileSize),
         tempFilePath: params.tempFilePath,
-        mimeType: params.mimeType,
         status: "queued",
+        parentId: params.parentId || null,
       },
     });
 
-    log.info("Upload job registered in queue", { jobId: job.id, fileName: job.fileName });
+    log.info("Upload job registered in queue", { jobId: job.id, fileName: job.fileName, parentId: job.parentId });
     return job;
   }
 
@@ -56,7 +37,7 @@ export class UploadJobQueue {
    * Retrieve the next queued job available for processing.
    */
   static async getNextJob() {
-    return this.db.findFirst({
+    return prisma.uploadJob.findFirst({
       where: {
         status: "queued",
       },
@@ -68,24 +49,16 @@ export class UploadJobQueue {
 
   /**
    * Update the live progress and status metrics of an active job.
+   * Offloads blocking database writes during in-flight chunk streams to ensure maximum network throughput.
    */
   static async updateJobProgress(jobId: string, percent: number, uploadedBytes: number, speed: string, eta: string) {
-    await this.db.update({
-      where: { id: jobId },
-      data: {
-        progress: percent,
-        uploadedBytes: BigInt(uploadedBytes),
-        status: "processing",
-      },
-    });
-
-    // Broadcast live to SSE listeners
+    // Broadcast live to SSE listeners in-memory instantly (zero DB bottleneck!)
     progressBroadcaster.broadcast(jobId, {
       jobId,
       status: "processing",
       percent,
       uploadedBytes,
-      totalBytes: 0,
+      totalBytes: 0, // Injected downstream based on file size
       speed,
       eta,
     });
@@ -95,7 +68,7 @@ export class UploadJobQueue {
    * Transition job to successfully completed. Removes the temporary disk file.
    */
   static async completeJob(jobId: string) {
-    const job = await this.db.update({
+    const job = await prisma.uploadJob.update({
       where: { id: jobId },
       data: {
         status: "completed",
@@ -105,6 +78,7 @@ export class UploadJobQueue {
 
     log.info("Upload job successfully completed", { jobId });
 
+    // Clean up temporary file safely
     await this.cleanupTempFile(job.tempFilePath);
 
     progressBroadcaster.broadcast(jobId, {
@@ -124,7 +98,7 @@ export class UploadJobQueue {
    * Fail a job, incrementing retry counters or moving it to final failed status.
    */
   static async failJob(jobId: string, error: Error) {
-    const job = await this.db.findUnique({
+    const job = await prisma.uploadJob.findUnique({
       where: { id: jobId },
     });
 
@@ -134,7 +108,7 @@ export class UploadJobQueue {
     const isFinalFailure = nextRetry >= job.maxRetries;
     const nextStatus = isFinalFailure ? "failed" : "queued";
 
-    const updatedJob = await this.db.update({
+    const updatedJob = await prisma.uploadJob.update({
       where: { id: jobId },
       data: {
         status: nextStatus,
@@ -171,13 +145,13 @@ export class UploadJobQueue {
    * Cancel an active upload job, cleaning up temp disk footprint.
    */
   static async cancelJob(jobId: string) {
-    const job = await this.db.findUnique({
+    const job = await prisma.uploadJob.findUnique({
       where: { id: jobId },
     });
 
     if (!job || job.status === "completed" || job.status === "cancelled") return;
 
-    await this.db.update({
+    await prisma.uploadJob.update({
       where: { id: jobId },
       data: {
         status: "cancelled",

@@ -783,6 +783,7 @@ export const FileScalarFieldEnum = {
   fileSize: 'fileSize',
   mimeType: 'mimeType',
   isDeleted: 'isDeleted',
+  parentId: 'parentId',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
@@ -796,13 +797,13 @@ export const UploadJobScalarFieldEnum = {
   fileName: 'fileName',
   fileSize: 'fileSize',
   tempFilePath: 'tempFilePath',
-  mimeType: 'mimeType',
   status: 'status',
   progress: 'progress',
   uploadedBytes: 'uploadedBytes',
   errorMessage: 'errorMessage',
   retries: 'retries',
   maxRetries: 'maxRetries',
+  parentId: 'parentId',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const

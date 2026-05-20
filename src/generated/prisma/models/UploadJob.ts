@@ -48,13 +48,13 @@ export type UploadJobMinAggregateOutputType = {
   fileName: string | null
   fileSize: bigint | null
   tempFilePath: string | null
-  mimeType: string | null
   status: string | null
   progress: number | null
   uploadedBytes: bigint | null
   errorMessage: string | null
   retries: number | null
   maxRetries: number | null
+  parentId: string | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -65,13 +65,13 @@ export type UploadJobMaxAggregateOutputType = {
   fileName: string | null
   fileSize: bigint | null
   tempFilePath: string | null
-  mimeType: string | null
   status: string | null
   progress: number | null
   uploadedBytes: bigint | null
   errorMessage: string | null
   retries: number | null
   maxRetries: number | null
+  parentId: string | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -82,13 +82,13 @@ export type UploadJobCountAggregateOutputType = {
   fileName: number
   fileSize: number
   tempFilePath: number
-  mimeType: number
   status: number
   progress: number
   uploadedBytes: number
   errorMessage: number
   retries: number
   maxRetries: number
+  parentId: number
   createdAt: number
   updatedAt: number
   _all: number
@@ -117,13 +117,13 @@ export type UploadJobMinAggregateInputType = {
   fileName?: true
   fileSize?: true
   tempFilePath?: true
-  mimeType?: true
   status?: true
   progress?: true
   uploadedBytes?: true
   errorMessage?: true
   retries?: true
   maxRetries?: true
+  parentId?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -134,13 +134,13 @@ export type UploadJobMaxAggregateInputType = {
   fileName?: true
   fileSize?: true
   tempFilePath?: true
-  mimeType?: true
   status?: true
   progress?: true
   uploadedBytes?: true
   errorMessage?: true
   retries?: true
   maxRetries?: true
+  parentId?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -151,13 +151,13 @@ export type UploadJobCountAggregateInputType = {
   fileName?: true
   fileSize?: true
   tempFilePath?: true
-  mimeType?: true
   status?: true
   progress?: true
   uploadedBytes?: true
   errorMessage?: true
   retries?: true
   maxRetries?: true
+  parentId?: true
   createdAt?: true
   updatedAt?: true
   _all?: true
@@ -255,13 +255,13 @@ export type UploadJobGroupByOutputType = {
   fileName: string
   fileSize: bigint
   tempFilePath: string
-  mimeType: string
   status: string
   progress: number
   uploadedBytes: bigint
   errorMessage: string | null
   retries: number
   maxRetries: number
+  parentId: string | null
   createdAt: Date
   updatedAt: Date
   _count: UploadJobCountAggregateOutputType | null
@@ -295,13 +295,13 @@ export type UploadJobWhereInput = {
   fileName?: Prisma.StringFilter<"UploadJob"> | string
   fileSize?: Prisma.BigIntFilter<"UploadJob"> | bigint | number
   tempFilePath?: Prisma.StringFilter<"UploadJob"> | string
-  mimeType?: Prisma.StringFilter<"UploadJob"> | string
   status?: Prisma.StringFilter<"UploadJob"> | string
   progress?: Prisma.FloatFilter<"UploadJob"> | number
   uploadedBytes?: Prisma.BigIntFilter<"UploadJob"> | bigint | number
   errorMessage?: Prisma.StringNullableFilter<"UploadJob"> | string | null
   retries?: Prisma.IntFilter<"UploadJob"> | number
   maxRetries?: Prisma.IntFilter<"UploadJob"> | number
+  parentId?: Prisma.StringNullableFilter<"UploadJob"> | string | null
   createdAt?: Prisma.DateTimeFilter<"UploadJob"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"UploadJob"> | Date | string
 }
@@ -312,13 +312,13 @@ export type UploadJobOrderByWithRelationInput = {
   fileName?: Prisma.SortOrder
   fileSize?: Prisma.SortOrder
   tempFilePath?: Prisma.SortOrder
-  mimeType?: Prisma.SortOrder
   status?: Prisma.SortOrder
   progress?: Prisma.SortOrder
   uploadedBytes?: Prisma.SortOrder
   errorMessage?: Prisma.SortOrderInput | Prisma.SortOrder
   retries?: Prisma.SortOrder
   maxRetries?: Prisma.SortOrder
+  parentId?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -332,13 +332,13 @@ export type UploadJobWhereUniqueInput = Prisma.AtLeast<{
   fileName?: Prisma.StringFilter<"UploadJob"> | string
   fileSize?: Prisma.BigIntFilter<"UploadJob"> | bigint | number
   tempFilePath?: Prisma.StringFilter<"UploadJob"> | string
-  mimeType?: Prisma.StringFilter<"UploadJob"> | string
   status?: Prisma.StringFilter<"UploadJob"> | string
   progress?: Prisma.FloatFilter<"UploadJob"> | number
   uploadedBytes?: Prisma.BigIntFilter<"UploadJob"> | bigint | number
   errorMessage?: Prisma.StringNullableFilter<"UploadJob"> | string | null
   retries?: Prisma.IntFilter<"UploadJob"> | number
   maxRetries?: Prisma.IntFilter<"UploadJob"> | number
+  parentId?: Prisma.StringNullableFilter<"UploadJob"> | string | null
   createdAt?: Prisma.DateTimeFilter<"UploadJob"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"UploadJob"> | Date | string
 }, "id">
@@ -349,13 +349,13 @@ export type UploadJobOrderByWithAggregationInput = {
   fileName?: Prisma.SortOrder
   fileSize?: Prisma.SortOrder
   tempFilePath?: Prisma.SortOrder
-  mimeType?: Prisma.SortOrder
   status?: Prisma.SortOrder
   progress?: Prisma.SortOrder
   uploadedBytes?: Prisma.SortOrder
   errorMessage?: Prisma.SortOrderInput | Prisma.SortOrder
   retries?: Prisma.SortOrder
   maxRetries?: Prisma.SortOrder
+  parentId?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   _count?: Prisma.UploadJobCountOrderByAggregateInput
@@ -374,13 +374,13 @@ export type UploadJobScalarWhereWithAggregatesInput = {
   fileName?: Prisma.StringWithAggregatesFilter<"UploadJob"> | string
   fileSize?: Prisma.BigIntWithAggregatesFilter<"UploadJob"> | bigint | number
   tempFilePath?: Prisma.StringWithAggregatesFilter<"UploadJob"> | string
-  mimeType?: Prisma.StringWithAggregatesFilter<"UploadJob"> | string
   status?: Prisma.StringWithAggregatesFilter<"UploadJob"> | string
   progress?: Prisma.FloatWithAggregatesFilter<"UploadJob"> | number
   uploadedBytes?: Prisma.BigIntWithAggregatesFilter<"UploadJob"> | bigint | number
   errorMessage?: Prisma.StringNullableWithAggregatesFilter<"UploadJob"> | string | null
   retries?: Prisma.IntWithAggregatesFilter<"UploadJob"> | number
   maxRetries?: Prisma.IntWithAggregatesFilter<"UploadJob"> | number
+  parentId?: Prisma.StringNullableWithAggregatesFilter<"UploadJob"> | string | null
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"UploadJob"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"UploadJob"> | Date | string
 }
@@ -391,13 +391,13 @@ export type UploadJobCreateInput = {
   fileName: string
   fileSize: bigint | number
   tempFilePath: string
-  mimeType?: string
   status: string
   progress?: number
   uploadedBytes?: bigint | number
   errorMessage?: string | null
   retries?: number
   maxRetries?: number
+  parentId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -408,13 +408,13 @@ export type UploadJobUncheckedCreateInput = {
   fileName: string
   fileSize: bigint | number
   tempFilePath: string
-  mimeType?: string
   status: string
   progress?: number
   uploadedBytes?: bigint | number
   errorMessage?: string | null
   retries?: number
   maxRetries?: number
+  parentId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -425,13 +425,13 @@ export type UploadJobUpdateInput = {
   fileName?: Prisma.StringFieldUpdateOperationsInput | string
   fileSize?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   tempFilePath?: Prisma.StringFieldUpdateOperationsInput | string
-  mimeType?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.StringFieldUpdateOperationsInput | string
   progress?: Prisma.FloatFieldUpdateOperationsInput | number
   uploadedBytes?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   errorMessage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   retries?: Prisma.IntFieldUpdateOperationsInput | number
   maxRetries?: Prisma.IntFieldUpdateOperationsInput | number
+  parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -442,13 +442,13 @@ export type UploadJobUncheckedUpdateInput = {
   fileName?: Prisma.StringFieldUpdateOperationsInput | string
   fileSize?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   tempFilePath?: Prisma.StringFieldUpdateOperationsInput | string
-  mimeType?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.StringFieldUpdateOperationsInput | string
   progress?: Prisma.FloatFieldUpdateOperationsInput | number
   uploadedBytes?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   errorMessage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   retries?: Prisma.IntFieldUpdateOperationsInput | number
   maxRetries?: Prisma.IntFieldUpdateOperationsInput | number
+  parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -459,13 +459,13 @@ export type UploadJobCreateManyInput = {
   fileName: string
   fileSize: bigint | number
   tempFilePath: string
-  mimeType?: string
   status: string
   progress?: number
   uploadedBytes?: bigint | number
   errorMessage?: string | null
   retries?: number
   maxRetries?: number
+  parentId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -476,13 +476,13 @@ export type UploadJobUpdateManyMutationInput = {
   fileName?: Prisma.StringFieldUpdateOperationsInput | string
   fileSize?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   tempFilePath?: Prisma.StringFieldUpdateOperationsInput | string
-  mimeType?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.StringFieldUpdateOperationsInput | string
   progress?: Prisma.FloatFieldUpdateOperationsInput | number
   uploadedBytes?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   errorMessage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   retries?: Prisma.IntFieldUpdateOperationsInput | number
   maxRetries?: Prisma.IntFieldUpdateOperationsInput | number
+  parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -493,13 +493,13 @@ export type UploadJobUncheckedUpdateManyInput = {
   fileName?: Prisma.StringFieldUpdateOperationsInput | string
   fileSize?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   tempFilePath?: Prisma.StringFieldUpdateOperationsInput | string
-  mimeType?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.StringFieldUpdateOperationsInput | string
   progress?: Prisma.FloatFieldUpdateOperationsInput | number
   uploadedBytes?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   errorMessage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   retries?: Prisma.IntFieldUpdateOperationsInput | number
   maxRetries?: Prisma.IntFieldUpdateOperationsInput | number
+  parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -510,13 +510,13 @@ export type UploadJobCountOrderByAggregateInput = {
   fileName?: Prisma.SortOrder
   fileSize?: Prisma.SortOrder
   tempFilePath?: Prisma.SortOrder
-  mimeType?: Prisma.SortOrder
   status?: Prisma.SortOrder
   progress?: Prisma.SortOrder
   uploadedBytes?: Prisma.SortOrder
   errorMessage?: Prisma.SortOrder
   retries?: Prisma.SortOrder
   maxRetries?: Prisma.SortOrder
+  parentId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -535,13 +535,13 @@ export type UploadJobMaxOrderByAggregateInput = {
   fileName?: Prisma.SortOrder
   fileSize?: Prisma.SortOrder
   tempFilePath?: Prisma.SortOrder
-  mimeType?: Prisma.SortOrder
   status?: Prisma.SortOrder
   progress?: Prisma.SortOrder
   uploadedBytes?: Prisma.SortOrder
   errorMessage?: Prisma.SortOrder
   retries?: Prisma.SortOrder
   maxRetries?: Prisma.SortOrder
+  parentId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -552,13 +552,13 @@ export type UploadJobMinOrderByAggregateInput = {
   fileName?: Prisma.SortOrder
   fileSize?: Prisma.SortOrder
   tempFilePath?: Prisma.SortOrder
-  mimeType?: Prisma.SortOrder
   status?: Prisma.SortOrder
   progress?: Prisma.SortOrder
   uploadedBytes?: Prisma.SortOrder
   errorMessage?: Prisma.SortOrder
   retries?: Prisma.SortOrder
   maxRetries?: Prisma.SortOrder
+  parentId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -587,13 +587,13 @@ export type UploadJobSelect<ExtArgs extends runtime.Types.Extensions.InternalArg
   fileName?: boolean
   fileSize?: boolean
   tempFilePath?: boolean
-  mimeType?: boolean
   status?: boolean
   progress?: boolean
   uploadedBytes?: boolean
   errorMessage?: boolean
   retries?: boolean
   maxRetries?: boolean
+  parentId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }, ExtArgs["result"]["uploadJob"]>
@@ -604,13 +604,13 @@ export type UploadJobSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Ext
   fileName?: boolean
   fileSize?: boolean
   tempFilePath?: boolean
-  mimeType?: boolean
   status?: boolean
   progress?: boolean
   uploadedBytes?: boolean
   errorMessage?: boolean
   retries?: boolean
   maxRetries?: boolean
+  parentId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }, ExtArgs["result"]["uploadJob"]>
@@ -621,13 +621,13 @@ export type UploadJobSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Ext
   fileName?: boolean
   fileSize?: boolean
   tempFilePath?: boolean
-  mimeType?: boolean
   status?: boolean
   progress?: boolean
   uploadedBytes?: boolean
   errorMessage?: boolean
   retries?: boolean
   maxRetries?: boolean
+  parentId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }, ExtArgs["result"]["uploadJob"]>
@@ -638,18 +638,18 @@ export type UploadJobSelectScalar = {
   fileName?: boolean
   fileSize?: boolean
   tempFilePath?: boolean
-  mimeType?: boolean
   status?: boolean
   progress?: boolean
   uploadedBytes?: boolean
   errorMessage?: boolean
   retries?: boolean
   maxRetries?: boolean
+  parentId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }
 
-export type UploadJobOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "userId" | "fileName" | "fileSize" | "tempFilePath" | "mimeType" | "status" | "progress" | "uploadedBytes" | "errorMessage" | "retries" | "maxRetries" | "createdAt" | "updatedAt", ExtArgs["result"]["uploadJob"]>
+export type UploadJobOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "userId" | "fileName" | "fileSize" | "tempFilePath" | "status" | "progress" | "uploadedBytes" | "errorMessage" | "retries" | "maxRetries" | "parentId" | "createdAt" | "updatedAt", ExtArgs["result"]["uploadJob"]>
 
 export type $UploadJobPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "UploadJob"
@@ -660,13 +660,13 @@ export type $UploadJobPayload<ExtArgs extends runtime.Types.Extensions.InternalA
     fileName: string
     fileSize: bigint
     tempFilePath: string
-    mimeType: string
     status: string
     progress: number
     uploadedBytes: bigint
     errorMessage: string | null
     retries: number
     maxRetries: number
+    parentId: string | null
     createdAt: Date
     updatedAt: Date
   }, ExtArgs["result"]["uploadJob"]>
@@ -1097,13 +1097,13 @@ export interface UploadJobFieldRefs {
   readonly fileName: Prisma.FieldRef<"UploadJob", 'String'>
   readonly fileSize: Prisma.FieldRef<"UploadJob", 'BigInt'>
   readonly tempFilePath: Prisma.FieldRef<"UploadJob", 'String'>
-  readonly mimeType: Prisma.FieldRef<"UploadJob", 'String'>
   readonly status: Prisma.FieldRef<"UploadJob", 'String'>
   readonly progress: Prisma.FieldRef<"UploadJob", 'Float'>
   readonly uploadedBytes: Prisma.FieldRef<"UploadJob", 'BigInt'>
   readonly errorMessage: Prisma.FieldRef<"UploadJob", 'String'>
   readonly retries: Prisma.FieldRef<"UploadJob", 'Int'>
   readonly maxRetries: Prisma.FieldRef<"UploadJob", 'Int'>
+  readonly parentId: Prisma.FieldRef<"UploadJob", 'String'>
   readonly createdAt: Prisma.FieldRef<"UploadJob", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"UploadJob", 'DateTime'>
 }

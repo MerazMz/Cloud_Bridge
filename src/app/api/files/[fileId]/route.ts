@@ -64,15 +64,50 @@ export async function GET(
       file.telegramMessageId
     );
 
+    // Resolve dynamic Content-Type and Content-Disposition to enable inline browser rendering
+    let resolvedMime = file.mimeType;
+    if (resolvedMime === "application/octet-stream" || !resolvedMime) {
+      const ext = file.fileName.split(".").pop()?.toLowerCase();
+      if (ext === "png") resolvedMime = "image/png";
+      else if (ext === "jpg" || ext === "jpeg") resolvedMime = "image/jpeg";
+      else if (ext === "gif") resolvedMime = "image/gif";
+      else if (ext === "webp") resolvedMime = "image/webp";
+      else if (ext === "svg") resolvedMime = "image/svg+xml";
+      else if (ext === "mp4") resolvedMime = "video/mp4";
+      else if (ext === "webm") resolvedMime = "video/webm";
+      else if (ext === "ogg") resolvedMime = "video/ogg";
+      else if (ext === "mp3") resolvedMime = "audio/mpeg";
+      else if (ext === "wav") resolvedMime = "audio/wav";
+      else if (ext === "pdf") resolvedMime = "application/pdf";
+      else if (ext === "zip") resolvedMime = "application/zip";
+      else if (ext === "tar") resolvedMime = "application/x-tar";
+      else if (ext === "rar") resolvedMime = "application/vnd.rar";
+      else if (ext === "7z") resolvedMime = "application/x-7z-compressed";
+      else if (ext === "txt") resolvedMime = "text/plain";
+      else if (ext === "html") resolvedMime = "text/html";
+      else if (ext === "css") resolvedMime = "text/css";
+      else if (ext === "js") resolvedMime = "text/javascript";
+      else if (ext === "json") resolvedMime = "application/json";
+    }
+
+    const isPreviewable = 
+      resolvedMime.startsWith("image/") || 
+      resolvedMime.startsWith("video/") || 
+      resolvedMime.startsWith("audio/") || 
+      resolvedMime === "application/pdf";
+
+    const disposition = isPreviewable 
+      ? "inline" 
+      : `attachment; filename="${encodeURIComponent(file.fileName)}"`;
+
     // Return the file content with standard download headers
     return new NextResponse(fileBuffer as any, {
       status: 200,
       headers: {
-        "Content-Type": file.mimeType,
+        "Content-Type": resolvedMime,
         "Content-Length": fileBuffer.length.toString(),
-        "Content-Disposition": `attachment; filename="${encodeURIComponent(
-          file.fileName
-        )}"`,
+        "Content-Disposition": disposition,
+        "Cache-Control": "public, max-age=31536000, immutable",
       },
     });
   } catch (error) {
@@ -122,6 +157,15 @@ export async function DELETE(
     const permanent = url.searchParams.get("permanent") === "true";
 
     if (permanent) {
+      if (file.mimeType === "folder") {
+        // Direct database deletion for virtual folders (cascades sub-files automatically)
+        await prisma.file.delete({
+          where: { id: fileId },
+        });
+        log.info("Folder and its children permanently deleted from database.", { fileId });
+        return successResponse(null, "Folder permanently deleted.");
+      }
+
       // Permanent Delete: remove from Telegram and database
       const user = await prisma.user.findUnique({
         where: { id: userId },

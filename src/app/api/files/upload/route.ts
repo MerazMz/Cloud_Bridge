@@ -35,30 +35,51 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 3. Parse request Form Data
-    const formData = await request.formData();
-    const file = formData.get("file") as File | null;
+    // 3. Extract metadata and obtain stream handle
+    let fileName = "unnamed_file";
+    let fileSize = 0;
+    let fileStream: ReadableStream<Uint8Array> | null = null;
 
-    if (!file) {
+    const fileNameHeader = request.headers.get("x-file-name");
+    const fileSizeHeader = request.headers.get("x-file-size");
+
+    if (fileNameHeader) {
+      fileName = decodeURIComponent(fileNameHeader);
+      fileSize = Number(fileSizeHeader || "0");
+      fileStream = request.body;
+    } else {
+      // Fallback to standard form data parsing
+      const formData = await request.formData();
+      const file = formData.get("file") as File | null;
+      if (file) {
+        fileName = file.name || "unnamed_file";
+        fileSize = file.size;
+        fileStream = file.stream() as unknown as ReadableStream<Uint8Array>;
+      }
+    }
+
+    const parentIdHeader = request.headers.get("x-parent-id");
+    let parentId: string | null = parentIdHeader || null;
+    if (parentId === "null" || parentId === "undefined" || !parentId) {
+      parentId = null;
+    }
+
+    if (!fileStream) {
       return new Response(
         JSON.stringify({ success: false, message: "No file provided." }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    const fileName = file.name || "unnamed_file";
-    const fileSize = file.size;
-    const mimeType = file.type || "application/octet-stream";
-
-    log.info("Ingesting stream upload", { fileName, fileSize, mimeType });
+    log.info("Ingesting stream upload", { fileName, fileSize, parentId, method: fileNameHeader ? "raw-stream" : "form-data" });
 
     // 4. Stream to disk and queue background worker job
     const jobId = await uploadService.initiateUpload(
       userId,
       fileName,
       fileSize,
-      mimeType,
-      file.stream() as unknown as ReadableStream<Uint8Array>
+      fileStream,
+      parentId || undefined
     );
 
     return new Response(

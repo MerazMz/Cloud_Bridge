@@ -53,12 +53,16 @@ model File {
   fileSize          BigInt
   mimeType          String
   isDeleted         Boolean  @default(false)
+  parentId          String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent   File?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children File[] @relation("FolderHierarchy")
 
   @@index([userId])
+  @@index([parentId])
   @@map("files")
 }
 
@@ -68,13 +72,13 @@ model UploadJob {
   fileName       String
   fileSize       BigInt
   tempFilePath   String
-  mimeType       String   @default("application/octet-stream")
   status         String   // "queued", "processing", "completed", "failed", "cancelled"
   progress       Float    @default(0)
   uploadedBytes  BigInt   @default(0)
   errorMessage   String?  @db.Text
   retries        Int      @default(0)
   maxRetries     Int      @default(3)
+  parentId       String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

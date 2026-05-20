@@ -4,29 +4,17 @@ import { writeWebStreamToDisk } from "./core/stream-pipeline";
 import { prisma } from "@/lib/prisma";
 import { promises as fs } from "fs";
 import path from "path";
+import os from "os";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("UploadService");
 
 class UploadService {
-  private tempDir = path.join(process.cwd(), "temp_uploads");
+  private tempDir = os.tmpdir();
 
   constructor() {
     // Automatically start background worker queue polling
     uploadWorkerPool.start();
-    this.ensureTempDir();
-  }
-
-  /**
-   * Helper to ensure temp directory exists on initialization.
-   */
-  private async ensureTempDir() {
-    try {
-      await fs.mkdir(this.tempDir, { recursive: true });
-      log.debug("Temp uploads directory verified", { path: this.tempDir });
-    } catch (err: any) {
-      log.error("Failed to create temp directory", { err: err.message });
-    }
   }
 
   /**
@@ -37,13 +25,13 @@ class UploadService {
     userId: string,
     fileName: string,
     fileSize: number,
-    mimeType: string,
-    fileStream: ReadableStream<Uint8Array>
+    fileStream: ReadableStream<Uint8Array>,
+    parentId?: string
   ): Promise<string> {
     const safeFileName = `${Date.now()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
     const tempFilePath = path.join(this.tempDir, safeFileName);
 
-    log.info("Initiating streaming upload pipeline to disk", { fileName, fileSize, tempFilePath });
+    log.info("Initiating streaming upload pipeline to disk", { fileName, fileSize, tempFilePath, parentId });
 
     // 1. Zero-copy stream directly to server disk
     await writeWebStreamToDisk(fileStream, tempFilePath);
@@ -55,12 +43,9 @@ class UploadService {
       userId,
       fileName,
       fileSize,
-      mimeType,
       tempFilePath,
+      parentId,
     });
-
-    // 3. Immediately trigger background queue uploader checks asynchronously!
-    uploadWorkerPool.triggerCheck();
 
     return job.id;
   }

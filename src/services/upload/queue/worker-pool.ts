@@ -1,6 +1,8 @@
 import { UploadJobQueue } from "./job-queue";
 import { uploadToTelegramStream } from "../core/mtproto-uploader";
 import { getClientForUser } from "@/services/telegram/telegram.service";
+import { createTelegramClient } from "@/services/telegram/client";
+import { decryptSession } from "@/services/crypto/crypto.service";
 import { prisma } from "@/lib/prisma";
 import { Api } from "telegram";
 import bigInt from "big-integer";
@@ -11,46 +13,39 @@ const log = createLogger("UploadWorkerPool");
 class UploadWorkerPool {
   private activeJobs = 0;
   private maxActiveJobs = 2; // Default queue concurrency limit
-  private isRunning = false;
+  private isPolling = false;
+  private intervalId: NodeJS.Timeout | null = null;
 
   /**
-   * Start the background worker system.
+   * Start the background polling system.
    */
   start() {
-    if (this.isRunning) return;
-    this.isRunning = true;
+    if (this.isPolling) return;
+    this.isPolling = true;
     log.info("Upload background worker pool started.");
 
-    // Perform an initial startup check to pick up any left-over queued/retry jobs!
-    this.triggerCheck();
+    // Poll every 1 second
+    this.intervalId = setInterval(() => {
+      this.processQueue();
+    }, 1000);
   }
 
   /**
-   * Stop the background worker system.
+   * Stop the background polling system.
    */
   stop() {
-    this.isRunning = false;
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+    this.isPolling = false;
     log.info("Upload background worker pool stopped.");
-  }
-
-  /**
-   * Public trigger to execute a queue check immediately and asynchronously.
-   * Completely replaces high-frequency setInterval polling.
-   */
-  triggerCheck() {
-    if (!this.isRunning) return;
-    setTimeout(() => {
-      this.processQueue().catch((err) => {
-        log.error("Error in triggerCheck processing queue", { err: err.message });
-      });
-    }, 0);
   }
 
   /**
    * Process pending jobs in the queue up to concurrency limit.
    */
   private async processQueue() {
-    if (!this.isRunning) return;
     if (this.activeJobs >= this.maxActiveJobs) return;
 
     const job = await UploadJobQueue.getNextJob();
@@ -66,11 +61,11 @@ class UploadWorkerPool {
 
     log.info("Picked up job for processing", { jobId: job.id, file: job.fileName });
 
-    // Process asynchronously to avoid blocking the queue loop
+    // Process asynchronously to avoid blocking the queue poll loop
     this.processJob(job).finally(() => {
       this.activeJobs--;
-      // Immediately trigger next check to process consecutive queued tasks
-      this.triggerCheck();
+      // Immediately trigger loop in case more jobs are ready
+      this.processQueue();
     });
   }
 
@@ -79,6 +74,7 @@ class UploadWorkerPool {
    */
   private async processJob(job: any) {
     let client: any = null;
+    const clientPool: any[] = [];
 
     try {
       // 1. Fetch user data and storage channel credentials
@@ -94,8 +90,43 @@ class UploadWorkerPool {
         throw new Error("User does not have an active Telegram storage channel configured.");
       }
 
-      // 2. Connect client and instantiate stream upload
+      // 2. Connect primary client and instantiate multipath stream upload pool
       client = await getClientForUser(job.userId);
+      clientPool.push(client);
+
+      try {
+        const userWithSession = await prisma.user.findUnique({
+          where: { id: job.userId },
+          select: {
+            telegramSessionEncrypted: true,
+            telegramSessionIv: true,
+            telegramSessionAuthTag: true,
+          },
+        });
+        if (
+          userWithSession &&
+          userWithSession.telegramSessionEncrypted &&
+          userWithSession.telegramSessionIv &&
+          userWithSession.telegramSessionAuthTag
+        ) {
+          const sessionString = decryptSession(
+            userWithSession.telegramSessionEncrypted,
+            userWithSession.telegramSessionIv,
+            userWithSession.telegramSessionAuthTag
+          );
+          // Spawn 3 extra concurrent socket connections (total 4 parallel TCP pipes)
+          const poolPromises = [];
+          for (let i = 0; i < 3; i++) {
+            const extraClient = createTelegramClient(sessionString);
+            poolPromises.push(extraClient.connect().then(() => extraClient));
+          }
+          const extraConnected = await Promise.all(poolPromises);
+          clientPool.push(...extraConnected);
+          log.info("Initialized multipath TCP client pool successfully", { size: clientPool.length });
+        }
+      } catch (poolErr: any) {
+        log.error("Failed to build parallel upload client pool, falling back to single client stream", poolErr);
+      }
 
       const channelPeer = new Api.InputPeerChannel({
         channelId: bigInt(user.storageChannelId.toString()),
@@ -107,20 +138,44 @@ class UploadWorkerPool {
         file: job.fileName,
       });
 
-      // 3. Upload parts concurrently
+      // 3. Upload parts concurrently using the client TCP stream pool
       const inputFile = await uploadToTelegramStream({
-        client,
+        client: clientPool,
         jobId: job.id,
         filePath: job.tempFilePath,
         fileName: job.fileName,
         fileSize: Number(job.fileSize),
-        workers: 8, // Aggressive 8-worker parallel pipeline
+        workers: 16, // High-performance 16-worker parallel pipeline saturating dual TCP connections
         onProgress: async (percent, uploadedBytes, speed, eta) => {
           await UploadJobQueue.updateJobProgress(job.id, percent, uploadedBytes, speed, eta);
         },
       });
 
       // 4. Send document message to Telegram channel
+      let mimeType = "application/octet-stream";
+      const ext = job.fileName.split(".").pop()?.toLowerCase();
+      if (ext === "png") mimeType = "image/png";
+      else if (ext === "jpg" || ext === "jpeg") mimeType = "image/jpeg";
+      else if (ext === "gif") mimeType = "image/gif";
+      else if (ext === "webp") mimeType = "image/webp";
+      else if (ext === "svg") mimeType = "image/svg+xml";
+      else if (ext === "mp4") mimeType = "video/mp4";
+      else if (ext === "webm") mimeType = "video/webm";
+      else if (ext === "ogg") mimeType = "video/ogg";
+      else if (ext === "mp3") mimeType = "audio/mpeg";
+      else if (ext === "wav") mimeType = "audio/wav";
+      else if (ext === "pdf") mimeType = "application/pdf";
+      else if (ext === "zip") mimeType = "application/zip";
+      else if (ext === "tar") mimeType = "application/x-tar";
+      else if (ext === "rar") mimeType = "application/vnd.rar";
+      else if (ext === "7z") mimeType = "application/x-7z-compressed";
+      else if (ext === "txt") mimeType = "text/plain";
+      else if (ext === "html") mimeType = "text/html";
+      else if (ext === "css") mimeType = "text/css";
+      else if (ext === "js") mimeType = "text/javascript";
+      else if (ext === "json") mimeType = "application/json";
+
+      // Always use the primary client for message registration to preserve message handlers
       const message = await client.sendFile(channelPeer, {
         file: inputFile,
         forceDocument: true,
@@ -130,14 +185,15 @@ class UploadWorkerPool {
         throw new Error("Telegram failed to register file message.");
       }
 
-      // 5. Register file details in the main File table
+      // 5. Register file details in the main File table scoped to parent directory if applicable
       await prisma.file.create({
         data: {
           userId: job.userId,
           telegramMessageId: message.id,
           fileName: job.fileName,
           fileSize: job.fileSize,
-          mimeType: job.mimeType || "application/octet-stream",
+          mimeType,
+          parentId: job.parentId || null,
         },
       });
 
@@ -147,18 +203,29 @@ class UploadWorkerPool {
       log.error("Failed to process upload job", { jobId: job.id, error: err.message });
       await UploadJobQueue.failJob(job.id, err);
     } finally {
-      // Clean up Telegram Client socket resources
-      if (client) {
-        try {
-          await client.disconnect();
-          log.debug("Telegram client disconnected to release resource buffers.", { userId: job.userId });
-        } catch (discErr: any) {
-          log.error("Failed to disconnect client safely", { discErr: discErr.message });
+      // Clean up all Telegram Client socket resources in the pool safely
+      for (const c of clientPool) {
+        if (c) {
+          try {
+            await c.disconnect();
+          } catch (discErr: any) {
+            log.error("Failed to disconnect client from pool safely", { error: discErr.message });
+          }
         }
       }
+      log.debug("Telegram client pool fully disconnected to release socket resources.");
     }
   }
 }
 
-// Global Singleton worker pool
-export const uploadWorkerPool = new UploadWorkerPool();
+// Define global interface for typescript
+declare global {
+  var uploadWorkerPool: UploadWorkerPool | undefined;
+}
+
+// Global Singleton worker pool using globalThis pattern to avoid duplication in Next.js dev server
+export const uploadWorkerPool = globalThis.uploadWorkerPool || new UploadWorkerPool();
+
+if (process.env.NODE_ENV !== "production") {
+  globalThis.uploadWorkerPool = uploadWorkerPool;
+}
