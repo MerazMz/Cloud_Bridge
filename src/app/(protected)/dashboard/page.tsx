@@ -60,6 +60,26 @@ function DashboardContent() {
   const [darkMode, setDarkMode] = useState(false);
   const [deletingIds, setDeletingIds] = useState<Record<string, boolean>>({});
   const [downloadingIds, setDownloadingIds] = useState<Record<string, boolean>>({});
+  const [compressVideo, setCompressVideo] = useState<boolean>(false);
+
+  // Load video compression preference from localStorage on mount
+  useEffect(() => {
+    const savedCompress = localStorage.getItem("cloudbridge_compress_video");
+    if (savedCompress !== null) {
+      setCompressVideo(savedCompress === "true");
+    }
+  }, []);
+
+  const handleToggleCompressVideo = (val: boolean) => {
+    setCompressVideo(val);
+    localStorage.setItem("cloudbridge_compress_video", val ? "true" : "false");
+    showToast("success", `Video compression turned ${val ? "ON" : "OFF"}.`);
+  };
+
+  const compressVideoRef = useRef(compressVideo);
+  useEffect(() => {
+    compressVideoRef.current = compressVideo;
+  }, [compressVideo]);
 
   // Folder Directory Navigation States
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -73,6 +93,20 @@ function DashboardContent() {
   const [gridSize, setGridSize] = useState<number>(160); // Dynamic card width: 100px - 260px
   const [hoveredFileId, setHoveredFileId] = useState<string | null>(null);
   const [selectedDetailsFile, setSelectedDetailsFile] = useState<DBFile | null>(null);
+
+  // Lightweight Image Viewer Modal States
+  const [activeImageViewerFileId, setActiveImageViewerFileId] = useState<string | null>(null);
+  const [imageZoom, setImageZoom] = useState<number>(1);
+  const [imageRotation, setImageRotation] = useState<number>(0);
+  const [imageFlipH, setImageFlipH] = useState<boolean>(false);
+  const [imageFlipV, setImageFlipV] = useState<boolean>(false);
+  const [isVideoBuffering, setIsVideoBuffering] = useState<boolean>(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Reset video buffering state on file switch or close
+  useEffect(() => {
+    setIsVideoBuffering(false);
+  }, [activeImageViewerFileId]);
 
   // Command palette state
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -133,6 +167,125 @@ function DashboardContent() {
   const [selectedFolderCategory, setSelectedFolderCategory] = useState<string | null>(null);
   const [activeMenuFileId, setActiveMenuFileId] = useState<string | null>(null);
 
+  // Keyboard navigation & zoom shortcuts listener for Image Viewer
+  useEffect(() => {
+    if (!activeImageViewerFileId) return;
+
+    // Helper to determine if file is a viewer-supported image or video
+    const isImageFile = (file: DBFile) => {
+      const mimeLower = (file.mimeType || "").toLowerCase();
+      const nameLower = (file.fileName || "").toLowerCase();
+      return (
+        mimeLower.startsWith("image/") || 
+        mimeLower.startsWith("video/") ||
+        ((mimeLower === "application/octet-stream" || !mimeLower) && 
+         /\.(png|jpg|jpeg|gif|webp|svg|mp4|mov|webm|mkv|avi)$/i.test(nameLower))
+      );
+    };
+
+    // Calculate activeImages dynamically on keydown event to satisfy Rules of Hooks perfectly
+    const getActiveImages = () => {
+      const activeFiles = files.filter((f) => !f.isDeleted);
+      let visibleFiles: DBFile[] = [];
+      if (tab === "dashboard") {
+        visibleFiles = activeFiles.slice(0, 5);
+      } else if (tab === "my-files" || tab === "recent") {
+        visibleFiles = activeFiles;
+      } else if (tab === "favorites") {
+        visibleFiles = activeFiles.filter((f) => favorites.includes(f.id));
+      } else if (tab === "shared") {
+        visibleFiles = activeFiles.filter((f) => sharedIds.includes(f.id));
+      } else if (tab === "trash") {
+        visibleFiles = files.filter((f) => f.isDeleted);
+      } else if (tab === "folders") {
+        if (selectedFolderCategory === "images") visibleFiles = activeFiles.filter(f => classifyFile(f.mimeType, f.fileName) === "image");
+        else if (selectedFolderCategory === "documents") visibleFiles = activeFiles.filter(f => classifyFile(f.mimeType, f.fileName) === "document");
+        else if (selectedFolderCategory === "media") visibleFiles = activeFiles.filter(f => classifyFile(f.mimeType, f.fileName) === "media");
+        else if (selectedFolderCategory === "archives") visibleFiles = activeFiles.filter(f => classifyFile(f.mimeType, f.fileName) === "archive");
+        else visibleFiles = activeFiles.filter(f => 
+          classifyFile(f.mimeType, f.fileName) !== "image" &&
+          classifyFile(f.mimeType, f.fileName) !== "document" &&
+          classifyFile(f.mimeType, f.fileName) !== "media" &&
+          classifyFile(f.mimeType, f.fileName) !== "archive"
+        );
+      }
+
+      const finalFiltered = visibleFiles.filter((f) =>
+        f.fileName.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+
+      return (
+        (tab === "dashboard" || tab === "my-files")
+          ? finalFiltered.filter((f) => f.mimeType !== "folder")
+          : finalFiltered
+      ).filter(isImageFile);
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const currentImages = getActiveImages();
+      const currentIndex = currentImages.findIndex((img) => img.id === activeImageViewerFileId);
+      const activeFile = currentImages[currentIndex];
+      const isVideo = activeFile && (
+        activeFile.mimeType.startsWith("video/") ||
+        /\.(mp4|mov|webm|mkv|avi)$/i.test(activeFile.fileName.toLowerCase())
+      );
+
+      if (e.key === "Escape") {
+        setActiveImageViewerFileId(null);
+      } else if (e.key === "ArrowRight") {
+        if (isVideo) {
+          e.preventDefault();
+          if (videoRef.current) {
+            videoRef.current.currentTime = Math.min(videoRef.current.currentTime + 10, videoRef.current.duration || 0);
+          }
+        } else {
+          if (currentIndex !== -1 && currentIndex < currentImages.length - 1) {
+            setActiveImageViewerFileId(currentImages[currentIndex + 1].id);
+            setImageZoom(1);
+            setImageRotation(0);
+            setImageFlipH(false);
+            setImageFlipV(false);
+          }
+        }
+      } else if (e.key === "ArrowLeft") {
+        if (isVideo) {
+          e.preventDefault();
+          if (videoRef.current) {
+            videoRef.current.currentTime = Math.max(videoRef.current.currentTime - 10, 0);
+          }
+        } else {
+          if (currentIndex !== -1 && currentIndex > 0) {
+            setActiveImageViewerFileId(currentImages[currentIndex - 1].id);
+            setImageZoom(1);
+            setImageRotation(0);
+            setImageFlipH(false);
+            setImageFlipV(false);
+          }
+        }
+      } else if (e.key === " ") {
+        if (isVideo) {
+          e.preventDefault();
+          if (videoRef.current) {
+            if (videoRef.current.paused) {
+              videoRef.current.play().catch(() => {});
+            } else {
+              videoRef.current.pause();
+            }
+          }
+        }
+      } else if (e.key === "=" || e.key === "+") {
+        setImageZoom((z) => Math.min(z + 0.25, 4));
+      } else if (e.key === "-") {
+        setImageZoom((z) => Math.max(z - 0.25, 0.5));
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [activeImageViewerFileId, files, tab, favorites, sharedIds, selectedFolderCategory, searchTerm, videoRef]);
+
   // Click-outside listener for dropdown menus
   useEffect(() => {
     const handleGlobalClick = () => {
@@ -169,7 +322,17 @@ function DashboardContent() {
   // Initialize theme and local storage states
   useEffect(() => {
     if (typeof window !== "undefined") {
-      setDarkMode(document.documentElement.classList.contains("dark"));
+      const savedTheme = localStorage.getItem("theme");
+      if (savedTheme === "dark") {
+        document.documentElement.classList.add("dark");
+        setDarkMode(true);
+      } else if (savedTheme === "light") {
+        document.documentElement.classList.remove("dark");
+        setDarkMode(false);
+      } else {
+        const hasDarkClass = document.documentElement.classList.contains("dark");
+        setDarkMode(hasDarkClass);
+      }
 
       // Load favorites
       try {
@@ -181,6 +344,25 @@ function DashboardContent() {
       try {
         const sh = localStorage.getItem("shared_ids");
         if (sh) setSharedIds(JSON.parse(sh));
+      } catch {}
+
+      // Load viewMode
+      try {
+        const savedViewMode = localStorage.getItem("viewMode");
+        if (savedViewMode === "list" || savedViewMode === "grid") {
+          setViewMode(savedViewMode);
+        }
+      } catch {}
+
+      // Load gridSize
+      try {
+        const savedGridSize = localStorage.getItem("gridSize");
+        if (savedGridSize) {
+          const parsed = parseInt(savedGridSize, 10);
+          if (!isNaN(parsed) && parsed >= 100 && parsed <= 260) {
+            setGridSize(parsed);
+          }
+        }
       } catch {}
     }
   }, []);
@@ -279,6 +461,83 @@ function DashboardContent() {
     }
   }, [uploadQueue]);
 
+  // Helper to perform uploads via XMLHttpRequest to track client-to-server progress instantly
+  const uploadFileWithXhr = (params: {
+    url: string;
+    file: File;
+    headers?: Record<string, string>;
+    formData?: FormData;
+    onProgress: (percent: number, loaded: number, total: number, speed: string) => void;
+    signal: AbortSignal;
+  }): Promise<any> => {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", params.url);
+
+      if (params.headers) {
+        Object.entries(params.headers).forEach(([key, value]) => {
+          xhr.setRequestHeader(key, value);
+        });
+      }
+
+      const startTime = Date.now();
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percent = Math.round((event.loaded / event.total) * 100);
+          const elapsed = (Date.now() - startTime) / 1000;
+          let speedStr = "0 KB/s";
+          if (elapsed > 0.5) {
+            const speedBytesPerSec = event.loaded / elapsed;
+            if (speedBytesPerSec > 1024 * 1024) {
+              speedStr = `${(speedBytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+            } else if (speedBytesPerSec > 1024) {
+              speedStr = `${(speedBytesPerSec / 1024).toFixed(0)} KB/s`;
+            } else {
+              speedStr = `${speedBytesPerSec.toFixed(0)} B/s`;
+            }
+          }
+          params.onProgress(percent, event.loaded, event.total, speedStr);
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText));
+          } catch {
+            resolve({ success: true });
+          }
+        } else {
+          let errorMsg = "Upload failed";
+          try {
+            const parsed = JSON.parse(xhr.responseText);
+            errorMsg = parsed.message || errorMsg;
+          } catch {}
+          reject(new Error(errorMsg));
+        }
+      };
+
+      xhr.onerror = () => {
+        reject(new Error("Network error during upload"));
+      };
+
+      xhr.onabort = () => {
+        reject(new Error("Upload cancelled"));
+      };
+
+      params.signal.addEventListener("abort", () => {
+        xhr.abort();
+      });
+
+      if (params.formData) {
+        xhr.send(params.formData);
+      } else {
+        xhr.send(params.file);
+      }
+    });
+  };
+
   // Processes and uploads a single item in the queue sequentially
   const uploadQueueItem = async (itemId: string, file: File, itemParentId?: string | null) => {
 
@@ -313,30 +572,43 @@ function DashboardContent() {
 
     try {
       // 1. Ingest streaming upload to disk and get background queue jobId
-      const ingestResponse = await fetch("/api/files/upload", {
-        method: "POST",
-        body: file, // Streams raw file directly to the network without in-memory buffering!
-        headers: {
-          "x-file-name": encodeURIComponent(file.name),
-          "x-file-size": file.size.toString(),
-          ...(itemParentId ? { "x-parent-id": itemParentId } : {}),
-        },
-        signal: abortController.signal,
-        // @ts-ignore - duplex is needed for browser direct raw stream support
-        duplex: "half",
-      });
-
-      if (!ingestResponse.ok) {
-        const errText = await ingestResponse.text();
-        let errMsg = "Upload failed.";
-        try {
-          const errJson = JSON.parse(errText);
-          errMsg = errJson.message || errMsg;
-        } catch {}
-        throw new Error(errMsg);
+      const headers: Record<string, string> = {
+        "x-file-name": encodeURIComponent(file.name),
+        "x-file-size": file.size.toString(),
+      };
+      if (itemParentId) {
+        headers["x-parent-id"] = itemParentId;
+      }
+      if (compressVideoRef.current) {
+        headers["x-compress-video"] = "true";
       }
 
-      const { jobId } = await ingestResponse.json();
+      const responseData = await uploadFileWithXhr({
+        url: "/api/files/upload",
+        file,
+        headers,
+        signal: abortController.signal,
+        onProgress: (percent, loaded, total, speed) => {
+          const displayPercent = Math.max(0, Math.min(99, percent));
+          setUploadQueue((prev) =>
+            prev.map((i) =>
+              i.id === itemId
+                ? {
+                    ...i,
+                    progress: displayPercent,
+                    speed: `${speed} (to server)`,
+                    uploadedBytes: loaded,
+                  }
+                : i
+            )
+          );
+          setUploadProgress(displayPercent);
+          setUploadedBytes(loaded);
+          setUploadSpeed(`${speed} (to server)`);
+        },
+      });
+
+      const { jobId } = responseData;
       currentJobId = jobId;
       currentJobIdRef.current = jobId;
 
@@ -483,23 +755,26 @@ function DashboardContent() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const ingestResponse = await fetch("/api/files/upload", {
-        method: "POST",
-        body: formData,
-        signal: abortController.signal,
-      });
-
-      if (!ingestResponse.ok) {
-        const errText = await ingestResponse.text();
-        let errMsg = "Upload failed.";
-        try {
-          const errJson = JSON.parse(errText);
-          errMsg = errJson.message || errMsg;
-        } catch {}
-        throw new Error(errMsg);
+      const headers: Record<string, string> = {};
+      if (compressVideoRef.current) {
+        headers["x-compress-video"] = "true";
       }
 
-      const { jobId } = await ingestResponse.json();
+      const responseData = await uploadFileWithXhr({
+        url: "/api/files/upload",
+        file,
+        formData,
+        headers,
+        signal: abortController.signal,
+        onProgress: (percent, loaded, total, speed) => {
+          const displayPercent = Math.max(0, Math.min(99, percent));
+          setUploadProgress(displayPercent);
+          setUploadedBytes(loaded);
+          setUploadSpeed(`${speed} (to server)`);
+        },
+      });
+
+      const { jobId } = responseData;
       currentJobIdRef.current = jobId;
 
       // 2. Connect to SSE telemetry stream for live speed, bytes, and percentage
@@ -830,7 +1105,10 @@ function DashboardContent() {
   };
 
   // Get dynamic file icon styles
-  const getFileStyle = (mime: string, name: string) => {
+   const getFileStyle = (mime: string, name: string) => {
+    if (mime.toLowerCase() === "folder") {
+      return { bg: "rgba(251, 191, 36, 0.12)", color: "#FBBF24" };
+    }
     const category = classifyFile(mime, name);
     switch (category) {
       case "image":
@@ -851,6 +1129,15 @@ function DashboardContent() {
     const nameLower = fileName?.toLowerCase() || "";
     const mimeLower = mimeType?.toLowerCase() || "";
 
+    // Specific custom icon branding for folders
+    if (mimeLower === "folder") {
+      return (
+        <svg style={{ width: "1.05rem", height: "1.05rem", color: "#FBBF24" }} viewBox="0 0 24 24" fill="currentColor">
+          <path d="M20 5h-8.586L9.414 3.004A2 2 0 008 2.418H4c-1.103 0-2 .897-2 2v14c0 1.103.897 2 2 2h16c1.103 0 2-.897 2-2V7c0-1.103-.897-2-2-2z" />
+        </svg>
+      );
+    }
+
     // Specific custom image branding for PDF
     if (nameLower.endsWith(".pdf") || mimeLower.includes("pdf")) {
       return (
@@ -858,6 +1145,52 @@ function DashboardContent() {
           src="/pdf.png"
           alt="PDF"
           style={{ width: "1.2rem", height: "1.2rem", objectFit: "contain", display: "block" }}
+        />
+      );
+    }
+
+    // Specific custom image branding for DOCS/Word
+    if (
+      nameLower.endsWith(".doc") ||
+      nameLower.endsWith(".docx") ||
+      nameLower.endsWith(".docs") ||
+      mimeLower.includes("word") ||
+      mimeLower.includes("officedocument.wordprocessingml")
+    ) {
+      return (
+        <img
+          src="/docs.png"
+          alt="Word File"
+          style={{ width: "1.3rem", height: "1.3rem", objectFit: "contain", display: "block" }}
+        />
+      );
+    }
+
+    // Specific custom image branding for Markdown
+    if (nameLower.endsWith(".md") || mimeLower.includes("markdown")) {
+      return (
+        <img
+          src="/md.png"
+          alt="Markdown File"
+          style={{ width: "1.3rem", height: "1.3rem", objectFit: "contain", display: "block" }}
+        />
+      );
+    }
+
+    // Specific custom image branding for Excel
+    if (
+      nameLower.endsWith(".xls") ||
+      nameLower.endsWith(".xlsx") ||
+      nameLower.endsWith(".csv") ||
+      mimeLower.includes("excel") ||
+      mimeLower.includes("spreadsheetml") ||
+      mimeLower.includes("csv")
+    ) {
+      return (
+        <img
+          src="/xls.png"
+          alt="Excel File"
+          style={{ width: "1.3rem", height: "1.3rem", objectFit: "contain", display: "block" }}
         />
       );
     }
@@ -1015,6 +1348,50 @@ function DashboardContent() {
     f.fileName.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // Helper to determine if file is a viewer-supported image or video
+  const isImageFile = (file: DBFile) => {
+    const mimeLower = (file.mimeType || "").toLowerCase();
+    const nameLower = (file.fileName || "").toLowerCase();
+    return (
+      mimeLower.startsWith("image/") || 
+      mimeLower.startsWith("video/") ||
+      ((mimeLower === "application/octet-stream" || !mimeLower) && 
+       /\.(png|jpg|jpeg|gif|webp|svg|mp4|mov|webm|mkv|avi)$/i.test(nameLower))
+    );
+  };
+
+  // List of all image files in current view mode
+  const activeImages = ((tab === "dashboard" || tab === "my-files") ? finalFilteredFiles.filter((f) => f.mimeType !== "folder") : finalFilteredFiles).filter(isImageFile);
+
+  const currentViewerIndex = activeImages.findIndex((img) => img.id === activeImageViewerFileId);
+  const currentViewerImage = activeImages.find((img) => img.id === activeImageViewerFileId);
+  const isViewerVideo = currentViewerImage ? (
+    currentViewerImage.mimeType.startsWith("video/") || 
+    ((currentViewerImage.mimeType === "application/octet-stream" || !currentViewerImage.mimeType) && 
+     /\.(mp4|webm|ogg|mov)$/i.test(currentViewerImage.fileName))
+  ) : false;
+
+  const handleNextViewerImage = () => {
+    if (currentViewerIndex !== -1 && currentViewerIndex < activeImages.length - 1) {
+      setActiveImageViewerFileId(activeImages[currentViewerIndex + 1].id);
+      setImageZoom(1);
+      setImageRotation(0);
+      setImageFlipH(false);
+      setImageFlipV(false);
+    }
+  };
+
+  const handlePrevViewerImage = () => {
+    if (currentViewerIndex !== -1 && currentViewerIndex > 0) {
+      setActiveImageViewerFileId(activeImages[currentViewerIndex - 1].id);
+      setImageZoom(1);
+      setImageRotation(0);
+      setImageFlipH(false);
+      setImageFlipV(false);
+    }
+  };
+
+
   // Helper renderer for trash bin list
   function renderTrashTable(fileList: DBFile[]) {
     if (fileList.length === 0) {
@@ -1129,15 +1506,17 @@ function DashboardContent() {
       />
 
       {/* Welcome & Cover Banner */}
-      <WelcomeBanner
-        userName={userName}
-        tab={tab}
-        triggerFileInput={triggerFileInput}
-        isUploading={isUploading}
-        showBanner={showBanner}
-        isBannerVisible={isBannerVisible}
-        handleCloseBanner={handleCloseBanner}
-      />
+      {tab !== "settings" && (
+        <WelcomeBanner
+          userName={userName}
+          tab={tab}
+          triggerFileInput={triggerFileInput}
+          isUploading={isUploading}
+          showBanner={showBanner}
+          isBannerVisible={isBannerVisible}
+          handleCloseBanner={handleCloseBanner}
+        />
+      )}
 
       {/* Conditional Rendering Based on Tabs */}
       {tab === "dashboard" && (
@@ -1163,6 +1542,7 @@ function DashboardContent() {
             isDragActive={isDragActive}
             handleDrag={handleDrag}
             handleDrop={handleDrop}
+            onCreateFolder={() => setIsNewFolderModalOpen(true)}
           />
 
           {/* Storage Overview & Recent Uploads Visuals */}
@@ -1193,17 +1573,45 @@ function DashboardContent() {
 
       {/* Folders Tab Directory Breakdowns */}
       {tab === "folders" && !selectedFolderCategory && (
-        <section className="animate-fade-in" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "1.15rem", width: "100%" }}>
+        <section className="animate-fade-in" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1.25rem", width: "100%" }}>
           {/* Images Folder */}
           <div
             onClick={() => setSelectedFolderCategory("images")}
             className="glass-card card-hover"
-            style={{ padding: "1.5rem", borderRadius: "16px", border: "1px solid var(--border-default)", background: "var(--bg-card)", display: "flex", flexDirection: "column", gap: "0.75rem", cursor: "pointer", transition: "all 0.2s ease" }}
+            style={{
+              padding: "1.65rem 1.5rem",
+              borderRadius: "16px",
+              border: "1px solid var(--border-default)",
+              background: "var(--bg-card)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.85rem",
+              cursor: "pointer",
+              transition: "all 0.22s ease",
+              boxShadow: "var(--glass-shadow)"
+            }}
           >
-            <div style={{ width: "40px", height: "40px", borderRadius: "10px", background: "rgba(16, 185, 129, 0.08)", display: "flex", alignItems: "center", fontSize: "1.3rem", color: "#10B981", justifyContent: "center" }}>🖼️</div>
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              <span style={{ fontSize: "0.9rem", fontWeight: 800, color: "var(--text-primary)" }}>Images</span>
-              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 500 }}>{imagesCount} files • {formatBytes(imagesSize)}</span>
+            <div
+              style={{
+                width: "42px",
+                height: "42px",
+                borderRadius: "12px",
+                background: "linear-gradient(135deg, rgba(255, 168, 0, 0.06) 0%, rgba(255, 122, 0, 0.12) 100%)",
+                border: "1px solid rgba(255, 168, 0, 0.15)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFA800" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+              <span style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.015em" }}>Images</span>
+              <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 500 }}>{imagesCount} files • {formatBytes(imagesSize)}</span>
             </div>
           </div>
 
@@ -1211,12 +1619,41 @@ function DashboardContent() {
           <div
             onClick={() => setSelectedFolderCategory("documents")}
             className="glass-card card-hover"
-            style={{ padding: "1.5rem", borderRadius: "16px", border: "1px solid var(--border-default)", background: "var(--bg-card)", display: "flex", flexDirection: "column", gap: "0.75rem", cursor: "pointer", transition: "all 0.2s ease" }}
+            style={{
+              padding: "1.65rem 1.5rem",
+              borderRadius: "16px",
+              border: "1px solid var(--border-default)",
+              background: "var(--bg-card)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.85rem",
+              cursor: "pointer",
+              transition: "all 0.22s ease",
+              boxShadow: "var(--glass-shadow)"
+            }}
           >
-            <div style={{ width: "40px", height: "40px", borderRadius: "10px", background: "rgba(239, 68, 68, 0.08)", display: "flex", alignItems: "center", fontSize: "1.3rem", color: "#EF4444", justifyContent: "center" }}>📄</div>
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              <span style={{ fontSize: "0.9rem", fontWeight: 800, color: "var(--text-primary)" }}>Documents</span>
-              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 500 }}>{documentsCount} files • {formatBytes(documentsSize)}</span>
+            <div
+              style={{
+                width: "42px",
+                height: "42px",
+                borderRadius: "12px",
+                background: "linear-gradient(135deg, rgba(255, 168, 0, 0.06) 0%, rgba(255, 122, 0, 0.12) 100%)",
+                border: "1px solid rgba(255, 168, 0, 0.15)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFA800" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+              </svg>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+              <span style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.015em" }}>Documents</span>
+              <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 500 }}>{documentsCount} files • {formatBytes(documentsSize)}</span>
             </div>
           </div>
 
@@ -1224,12 +1661,39 @@ function DashboardContent() {
           <div
             onClick={() => setSelectedFolderCategory("media")}
             className="glass-card card-hover"
-            style={{ padding: "1.5rem", borderRadius: "16px", border: "1px solid var(--border-default)", background: "var(--bg-card)", display: "flex", flexDirection: "column", gap: "0.75rem", cursor: "pointer", transition: "all 0.2s ease" }}
+            style={{
+              padding: "1.65rem 1.5rem",
+              borderRadius: "16px",
+              border: "1px solid var(--border-default)",
+              background: "var(--bg-card)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.85rem",
+              cursor: "pointer",
+              transition: "all 0.22s ease",
+              boxShadow: "var(--glass-shadow)"
+            }}
           >
-            <div style={{ width: "40px", height: "40px", borderRadius: "10px", background: "rgba(99, 102, 241, 0.08)", display: "flex", alignItems: "center", fontSize: "1.3rem", color: "#6366F1", justifyContent: "center" }}>🎥</div>
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              <span style={{ fontSize: "0.9rem", fontWeight: 800, color: "var(--text-primary)" }}>Audio & Video</span>
-              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 500 }}>{mediaFiles.length} files • {formatBytes(mediaSize)}</span>
+            <div
+              style={{
+                width: "42px",
+                height: "42px",
+                borderRadius: "12px",
+                background: "linear-gradient(135deg, rgba(255, 168, 0, 0.06) 0%, rgba(255, 122, 0, 0.12) 100%)",
+                border: "1px solid rgba(255, 168, 0, 0.15)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFA800" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="23 7 16 12 23 17 23 7" />
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+              </svg>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+              <span style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.015em" }}>Audio & Video</span>
+              <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 500 }}>{mediaFiles.length} files • {formatBytes(mediaSize)}</span>
             </div>
           </div>
 
@@ -1237,15 +1701,150 @@ function DashboardContent() {
           <div
             onClick={() => setSelectedFolderCategory("others")}
             className="glass-card card-hover"
-            style={{ padding: "1.5rem", borderRadius: "16px", border: "1px solid var(--border-default)", background: "var(--bg-card)", display: "flex", flexDirection: "column", gap: "0.75rem", cursor: "pointer", transition: "all 0.2s ease" }}
+            style={{
+              padding: "1.65rem 1.5rem",
+              borderRadius: "16px",
+              border: "1px solid var(--border-default)",
+              background: "var(--bg-card)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.85rem",
+              cursor: "pointer",
+              transition: "all 0.22s ease",
+              boxShadow: "var(--glass-shadow)"
+            }}
           >
-            <div style={{ width: "40px", height: "40px", borderRadius: "10px", background: "rgba(100, 116, 139, 0.08)", display: "flex", alignItems: "center", fontSize: "1.3rem", color: "#64748B", justifyContent: "center" }}>📦</div>
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              <span style={{ fontSize: "0.9rem", fontWeight: 800, color: "var(--text-primary)" }}>Archives & Others</span>
-              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 500 }}>{archiveFiles.length + otherFiles.length} files • {formatBytes(otherSize)}</span>
+            <div
+              style={{
+                width: "42px",
+                height: "42px",
+                borderRadius: "12px",
+                background: "linear-gradient(135deg, rgba(255, 168, 0, 0.06) 0%, rgba(255, 122, 0, 0.12) 100%)",
+                border: "1px solid rgba(255, 168, 0, 0.15)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFA800" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="16.5" y1="9.4" x2="7.5" y2="4.21" />
+                <polygon points="12 22.08 12 12 3 6.92 3 17.08 12 22.08" />
+                <polygon points="12 22.08 21 17.08 21 6.92 12 12 12 22.08" />
+                <polygon points="12 12 21 6.92 12 1.84 3 6.92 12 12" />
+              </svg>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+              <span style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.015em" }}>Archives & Others</span>
+              <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 500 }}>{archiveFiles.length + otherFiles.length} files • {formatBytes(otherSize)}</span>
             </div>
           </div>
         </section>
+      )}
+
+      {/* Settings Tab Panel */}
+      {tab === "settings" && (
+        <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: "1.5rem", width: "100%", maxWidth: "800px", margin: "0 auto", marginTop: "1rem" }}>
+          {/* Header Description */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", marginBottom: "0.5rem" }}>
+            <h2 style={{ fontSize: "1.4rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.03em", margin: 0 }}>
+              Portal Preferences
+            </h2>
+            <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", fontWeight: 500, margin: 0 }}>
+              Customize your security, upload, and media optimization parameters.
+            </p>
+          </div>
+
+          {/* Section: Upload Settings */}
+          <div
+            className="glass-card"
+            style={{
+              padding: "1.5rem",
+              borderRadius: "16px",
+              border: "1px solid var(--border-default)",
+              background: "var(--bg-card)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "1.25rem",
+              boxShadow: "var(--glass-shadow)"
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", borderBottom: "1px solid var(--border-subtle)", paddingBottom: "0.75rem" }}>
+              <div style={{ fontSize: "1.25rem" }}>⚙️</div>
+              <h3 style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text-primary)", margin: 0, letterSpacing: "-0.015em" }}>
+                Upload & Optimization
+              </h3>
+            </div>
+
+            {/* Optimization Toggle Row */}
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1.5rem" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", flex: 1 }}>
+                <span style={{ fontSize: "0.88rem", fontWeight: 700, color: "var(--text-primary)", letterSpacing: "-0.01em" }}>
+                  Compress video before uploading
+                </span>
+                <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 500, lineHeight: "1.45" }}>
+                  When enabled, CloudBridge will execute background hardware-accelerated video video compression (H.264 / Constant Rate Factor 23) upon server ingestion. This reduces sizes by up to 80% and accelerates transfer times, preserving original visual detail and copy-preserving your audio feeds perfectly!
+                </span>
+              </div>
+
+              {/* iOS Premium Toggle Switch */}
+              <button
+                onClick={() => handleToggleCompressVideo(!compressVideo)}
+                style={{
+                  width: "48px",
+                  height: "26px",
+                  borderRadius: "9999px",
+                  background: compressVideo ? "#F59E0B" : "rgba(100, 116, 139, 0.15)",
+                  border: "1px solid rgba(255,255,255,0.05)",
+                  position: "relative",
+                  cursor: "pointer",
+                  transition: "background-color 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
+                  padding: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  flexShrink: 0,
+                  boxShadow: compressVideo ? "0 2px 8px rgba(245, 158, 11, 0.3)" : "none",
+                }}
+              >
+                <div
+                  style={{
+                    width: "20px",
+                    height: "20px",
+                    borderRadius: "50%",
+                    background: "#ffffff",
+                    position: "absolute",
+                    left: compressVideo ? "24px" : "3px",
+                    transition: "left 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.2)"
+                  }}
+                />
+              </button>
+            </div>
+          </div>
+          
+          {/* Quick FAQ / Specs Card */}
+          <div
+            className="glass-card"
+            style={{
+              padding: "1.15rem",
+              borderRadius: "14px",
+              border: "1px solid var(--border-default)",
+              background: "rgba(15, 23, 42, 0.15)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.5rem"
+            }}
+          >
+            <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Technical Specifications
+            </span>
+            <ul style={{ margin: 0, paddingLeft: "1.1rem", display: "flex", flexDirection: "column", gap: "0.35rem", fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 500 }}>
+              <li>Uses premium <strong>H.264 High-Profile</strong> video encoders maximizing compatibility with Telegram's Web Player.</li>
+              <li>Preserves original frame rates, scaling resolutions, and aspect ratios.</li>
+              <li>Strict <strong>zero-reencode audio copy</strong> preserves your master tracks completely.</li>
+              <li>Runs fully multi-threaded asynchronously on the server to prevent browser thread locking.</li>
+            </ul>
+          </div>
+        </div>
       )}
 
       {/* Uploads Tab Dedicated Sequential Queue Dashboard */}
@@ -1571,7 +2170,7 @@ function DashboardContent() {
       )}
 
       {/* Main Files Table Card */}
-      {!(tab === "folders" && !selectedFolderCategory) && tab !== "uploads" && (
+      {!(tab === "folders" && !selectedFolderCategory) && tab !== "uploads" && tab !== "settings" && (
         <div
           className="glass-card animate-slide-up"
           style={{
@@ -1605,7 +2204,7 @@ function DashboardContent() {
                     marginRight: "0.2rem",
                   }}
                   className="dropdown-item-hover"
-                  title="Back to folders"
+                  title="Back to Organiser"
                 >
                   <svg style={{ width: "1rem", height: "1rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
@@ -1621,7 +2220,7 @@ function DashboardContent() {
                     style={{
                       background: "none",
                       border: "none",
-                      color: currentFolderId === null ? "var(--text-primary)" : "#FBBF24",
+                      color: currentFolderId === null ? (darkMode ? "#ffffff" : "#0f172a") : (darkMode ? "#FBBF24" : "#D97706"),
                       fontWeight: currentFolderId === null ? 800 : 700,
                       cursor: "pointer",
                       padding: "0.25rem 0.5rem",
@@ -1636,13 +2235,13 @@ function DashboardContent() {
                   </button>
                   {folderBreadcrumbs.map((bc, idx) => (
                     <div key={bc.id} style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                      <span style={{ color: "var(--text-muted)", fontSize: "0.75rem", opacity: 0.6 }}>/</span>
+                      <span style={{ color: darkMode ? "#94a3b8" : "#64748b", fontSize: "0.75rem", opacity: 0.6 }}>/</span>
                       <button
                         onClick={() => handleNavigateBreadcrumb(idx)}
                         style={{
                           background: "none",
                           border: "none",
-                          color: idx === folderBreadcrumbs.length - 1 ? "var(--text-primary)" : "#FBBF24",
+                          color: idx === folderBreadcrumbs.length - 1 ? (darkMode ? "#ffffff" : "#0f172a") : (darkMode ? "#FBBF24" : "#D97706"),
                           fontWeight: idx === folderBreadcrumbs.length - 1 ? 800 : 700,
                           cursor: "pointer",
                           padding: "0.25rem 0.5rem",
@@ -1659,7 +2258,7 @@ function DashboardContent() {
                   ))}
                 </div>
               ) : (
-                <h3 style={{ fontSize: "0.98rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.015em", textTransform: "capitalize" }}>
+                <h3 style={{ fontSize: "0.98rem", fontWeight: 800, color: darkMode ? "#ffffff" : "#0f172a", letterSpacing: "-0.015em", textTransform: "capitalize" }}>
                   {tab === "my-files" && "All Files"}
                   {tab === "folders" && selectedFolderCategory && `${selectedFolderCategory} files`}
                   {tab === "recent" && "Recent Uploads"}
@@ -1676,19 +2275,24 @@ function DashboardContent() {
                 <div style={{
                   display: "flex",
                   alignItems: "center",
-                  background: "rgba(30, 41, 59, 0.45)",
-                  border: "1px solid var(--border-default)",
+                  background: darkMode ? "rgba(30, 41, 59, 0.45)" : "rgba(15, 23, 42, 0.05)",
+                  border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
                   borderRadius: "8px",
                   padding: "0.15rem",
                   gap: "0.1rem",
                   height: "32px"
                 }}>
                   <button
-                    onClick={() => setViewMode("list")}
+                    onClick={() => {
+                      setViewMode("list");
+                      if (typeof window !== "undefined") {
+                        localStorage.setItem("viewMode", "list");
+                      }
+                    }}
                     style={{
                       background: viewMode === "list" ? "rgba(245, 158, 11, 0.15)" : "transparent",
                       border: "none",
-                      color: viewMode === "list" ? "#FBBF24" : "var(--text-muted)",
+                      color: viewMode === "list" ? (darkMode ? "#FBBF24" : "#D97706") : (darkMode ? "#94a3b8" : "#64748b"),
                       cursor: "pointer",
                       padding: "0.35rem 0.55rem",
                       borderRadius: "6px",
@@ -1705,11 +2309,16 @@ function DashboardContent() {
                     </svg>
                   </button>
                   <button
-                    onClick={() => setViewMode("grid")}
+                    onClick={() => {
+                      setViewMode("grid");
+                      if (typeof window !== "undefined") {
+                        localStorage.setItem("viewMode", "grid");
+                      }
+                    }}
                     style={{
                       background: viewMode === "grid" ? "rgba(245, 158, 11, 0.15)" : "transparent",
                       border: "none",
-                      color: viewMode === "grid" ? "#FBBF24" : "var(--text-muted)",
+                      color: viewMode === "grid" ? (darkMode ? "#FBBF24" : "#D97706") : (darkMode ? "#94a3b8" : "#64748b"),
                       cursor: "pointer",
                       padding: "0.35rem 0.55rem",
                       borderRadius: "6px",
@@ -1733,28 +2342,34 @@ function DashboardContent() {
                     display: "inline-flex",
                     alignItems: "center",
                     gap: "0.45rem",
-                    background: "rgba(30, 41, 59, 0.45)",
-                    border: "1px solid var(--border-default)",
+                    background: darkMode ? "rgba(30, 41, 59, 0.45)" : "rgba(15, 23, 42, 0.05)",
+                    border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
                     borderRadius: "8px",
                     padding: "0.35rem 0.65rem",
                     transition: "all 0.3s ease",
                     height: "32px"
                   }}>
-                    <span style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em" }}>Size:</span>
+                    <span style={{ fontSize: "0.68rem", color: darkMode ? "#94a3b8" : "#64748b", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em" }}>Size:</span>
                     <input
                       type="range"
                       min="100"
                       max="240"
                       value={gridSize}
-                      onChange={(e) => setGridSize(Number(e.target.value))}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setGridSize(val);
+                        if (typeof window !== "undefined") {
+                          localStorage.setItem("gridSize", val.toString());
+                        }
+                      }}
                       style={{
                         width: "60px",
-                        accentColor: "#FBBF24",
+                        accentColor: darkMode ? "#FBBF24" : "#D97706",
                         cursor: "ew-resize",
                         height: "4px"
                       }}
                     />
-                    <span style={{ fontSize: "0.68rem", color: "#FBBF24", fontWeight: 800, width: "30px", textAlign: "right" }}>{gridSize}px</span>
+                    <span style={{ fontSize: "0.68rem", color: darkMode ? "#FBBF24" : "#D97706", fontWeight: 800, width: "30px", textAlign: "right" }}>{gridSize}px</span>
                   </div>
                 )}
 
@@ -1793,9 +2408,9 @@ function DashboardContent() {
                     style={{
                       fontSize: "0.78rem",
                       fontWeight: 700,
-                      color: "#FBBF24",
+                      color: darkMode ? "#FBBF24" : "#D97706",
                       background: "transparent",
-                      border: "1px solid var(--border-default)",
+                      border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
                       borderRadius: "8px",
                       padding: "0.45rem 0.85rem",
                       display: "inline-flex",
@@ -1817,7 +2432,7 @@ function DashboardContent() {
           {/* Premium Folder Cards Grid Panel */}
           {(tab === "dashboard" || tab === "my-files") && finalFilteredFiles.filter((f) => f.mimeType === "folder").length > 0 && (
             <div style={{ marginBottom: "1.8rem" }}>
-              <h4 style={{ fontSize: "0.76rem", fontWeight: 700, color: "var(--text-muted)", marginBottom: "0.8rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              <h4 style={{ fontSize: "0.76rem", fontWeight: 700, color: darkMode ? "#94a3b8" : "#64748b", marginBottom: "0.8rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                 Folders ({finalFilteredFiles.filter((f) => f.mimeType === "folder").length})
               </h4>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "0.85rem" }}>
@@ -1829,9 +2444,9 @@ function DashboardContent() {
                       onDoubleClick={() => handleEnterFolder(folder.id, folder.fileName)}
                       onClick={() => handleEnterFolder(folder.id, folder.fileName)}
                       style={{
-                        background: "rgba(30, 41, 59, 0.45)",
+                        background: darkMode ? "rgba(30, 41, 59, 0.45)" : "rgba(255, 255, 255, 0.9)",
                         backdropFilter: "blur(12px)",
-                        border: "1px solid var(--border-default)",
+                        border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
                         borderRadius: "12px",
                         padding: "0.85rem 1rem",
                         display: "flex",
@@ -1840,6 +2455,7 @@ function DashboardContent() {
                         cursor: "pointer",
                         position: "relative",
                         transition: "all 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
+                        boxShadow: darkMode ? "none" : "0 4px 6px -1px rgba(0, 0, 0, 0.05)",
                       }}
                       className="folder-card-hover"
                     >
@@ -1848,11 +2464,13 @@ function DashboardContent() {
                           width: "36px",
                           height: "36px",
                           borderRadius: "8px",
-                          background: "linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(217, 119, 6, 0.05))",
+                          background: darkMode 
+                            ? "linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(217, 119, 6, 0.05))" 
+                            : "linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(251, 191, 36, 0.22))",
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
-                          color: "#FBBF24",
+                          color: darkMode ? "#FBBF24" : "#D97706",
                           flexShrink: 0,
                         }}
                       >
@@ -1866,7 +2484,7 @@ function DashboardContent() {
                           style={{
                             fontSize: "0.82rem",
                             fontWeight: 700,
-                            color: "var(--text-primary)",
+                            color: darkMode ? "#ffffff" : "#0f172a",
                             margin: 0,
                             overflow: "hidden",
                             textOverflow: "ellipsis",
@@ -1877,7 +2495,7 @@ function DashboardContent() {
                         >
                           {folder.fileName}
                         </p>
-                        <span style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontWeight: 500 }}>
+                        <span style={{ fontSize: "0.68rem", color: darkMode ? "#94a3b8" : "#64748b", fontWeight: 500 }}>
                           Directory
                         </span>
                       </div>
@@ -1894,7 +2512,7 @@ function DashboardContent() {
                           style={{
                             background: "none",
                             border: "none",
-                            color: "var(--text-muted)",
+                            color: darkMode ? "#94a3b8" : "#64748b",
                             cursor: "pointer",
                             padding: "0.25rem",
                             borderRadius: "4px",
@@ -1912,20 +2530,20 @@ function DashboardContent() {
                               position: "absolute",
                               right: 0,
                               top: "100%",
-                              background: "#1e293b",
-                              border: "1px solid var(--border-default)",
+                              background: darkMode ? "#1e293b" : "#ffffff",
+                              border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
                               borderRadius: "8px",
                               padding: "0.35rem",
                               zIndex: 40,
-                              boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.3)",
+                              boxShadow: darkMode ? "0 10px 15px -3px rgba(0, 0, 0, 0.3)" : "0 10px 15px -3px rgba(15, 23, 42, 0.08)",
                               minWidth: "110px",
                             }}
                           >
                             <button
                               onClick={(e) => {
-                                e.stopPropagation();
-                                handlePermanentDelete(folder.id, folder.fileName);
-                                setActiveMenuFileId(null);
+                                  e.stopPropagation();
+                                  handlePermanentDelete(folder.id, folder.fileName);
+                                  setActiveMenuFileId(null);
                               }}
                               style={{
                                 width: "100%",
@@ -1995,11 +2613,11 @@ function DashboardContent() {
                         <div
                           key={file.id}
                           style={{
-                            background: "rgba(30, 41, 59, 0.45)",
-                            backdropFilter: "blur(12px)",
-                            border: "1px solid var(--border-default)",
+                            background: "transparent",
+                            backdropFilter: "none",
+                            border: "none",
                             borderRadius: "14px",
-                            padding: "0.6rem",
+                            padding: 0,
                             display: "flex",
                             flexDirection: "column",
                             gap: "0.5rem",
@@ -2007,18 +2625,30 @@ function DashboardContent() {
                             transition: "all 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
                             cursor: "pointer",
                             width: "100%",
-                            overflow: "hidden"
+                            zIndex: activeMenuFileId === file.id ? 50 : 1,
+                            boxShadow: "none",
                           }}
                           className="folder-card-hover"
                           onMouseEnter={() => setHoveredFileId(file.id)}
                           onMouseLeave={() => setHoveredFileId(null)}
+                          onClick={() => {
+                            if (isImage || isVideo) {
+                              setActiveImageViewerFileId(file.id);
+                              setImageZoom(1);
+                              setImageRotation(0);
+                              setImageFlipH(false);
+                              setImageFlipV(false);
+                            } else {
+                              setSelectedDetailsFile(file);
+                            }
+                          }}
                         >
                           {/* Image/Video Preview or Icon slot */}
                           <div
                             style={{
                               width: "100%",
                               height: `${gridSize * 0.72}px`,
-                              borderRadius: "10px",
+                              borderRadius: "14px",
                               background: isVideo ? "#000" : "transparent",
                               border: "none",
                               overflow: "hidden",
@@ -2051,7 +2681,9 @@ function DashboardContent() {
                                   color: fileStyle.color || "#fff",
                                   display: "flex",
                                   alignItems: "center",
-                                  justifyContent: "center"
+                                  justifyContent: "center",
+                                  transform: "scale(2.4)",
+                                  transition: "transform 0.2s ease"
                                 }}
                               >
                                 {renderFileIcon(classifyFile(file.mimeType, file.fileName), file.fileName, file.mimeType)}
@@ -2068,8 +2700,8 @@ function DashboardContent() {
                                 position: "absolute",
                                 top: "0.4rem",
                                 left: "0.4rem",
-                                background: "rgba(15, 23, 42, 0.75)",
-                                border: "none",
+                                background: darkMode ? "rgba(15, 23, 42, 0.75)" : "rgba(255, 255, 255, 0.85)",
+                                border: darkMode ? "none" : "1px solid rgba(0, 0, 0, 0.08)",
                                 cursor: "pointer",
                                 padding: "0.3rem",
                                 borderRadius: "50%",
@@ -2084,7 +2716,7 @@ function DashboardContent() {
                               }}
                               title={isStarred ? "Starred" : "Star"}
                             >
-                              <svg style={{ width: "0.85rem", height: "0.85rem", color: isStarred ? "#FBBF24" : "#94A3B8" }} viewBox="0 0 24 24" fill={isStarred ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2.5">
+                              <svg style={{ width: "0.85rem", height: "0.85rem", color: isStarred ? "#FBBF24" : (darkMode ? "#94A3B8" : "#64748B") }} viewBox="0 0 24 24" fill={isStarred ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2.5">
                                 <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
                               </svg>
                             </button>
@@ -2099,160 +2731,193 @@ function DashboardContent() {
                             >
                               <button
                                 style={{
-                                  background: "rgba(15, 23, 42, 0.75)",
-                                  border: "none",
-                                  color: "#fff",
+                                  background: darkMode ? "rgba(15, 23, 42, 0.75)" : "rgba(255, 255, 255, 0.85)",
+                                  border: darkMode ? "none" : "1px solid rgba(0, 0, 0, 0.08)",
+                                  color: darkMode ? "#fff" : "#0f172a",
                                   cursor: "pointer",
                                   padding: "0.3rem",
                                   borderRadius: "50%",
                                   display: "flex",
                                   alignItems: "center",
                                   justifyContent: "center",
-                                  backdropFilter: "blur(4px)"
+                                  backdropFilter: "blur(4px)",
+                                  opacity: (hoveredFileId === file.id || activeMenuFileId === file.id) ? 1 : 0,
+                                  transform: (hoveredFileId === file.id || activeMenuFileId === file.id) ? "scale(1)" : "scale(0.85)",
+                                  transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
                                 }}
                               >
                                 <svg style={{ width: "0.85rem", height: "0.85rem" }} fill="currentColor" viewBox="0 0 24 24">
                                   <path d="M12 10.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm0-6a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm0 12a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z" />
                                 </svg>
                               </button>
-
-                              {activeMenuFileId === file.id && (
-                                <div
-                                  style={{
-                                    position: "absolute",
-                                    right: 0,
-                                    top: "110%",
-                                    background: "#1e293b",
-                                    border: "1px solid var(--border-default)",
-                                    borderRadius: "8px",
-                                    padding: "0.3rem",
-                                    zIndex: 50,
-                                    boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.3)",
-                                    minWidth: "120px",
-                                  }}
-                                >
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setSelectedDetailsFile(file);
-                                      setActiveMenuFileId(null);
-                                    }}
-                                    style={{
-                                      width: "100%",
-                                      textAlign: "left",
-                                      background: "none",
-                                      border: "none",
-                                      color: "var(--text-primary)",
-                                      fontSize: "0.74rem",
-                                      fontWeight: 700,
-                                      padding: "0.4rem 0.6rem",
-                                      borderRadius: "6px",
-                                      cursor: "pointer",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      gap: "0.35rem",
-                                    }}
-                                    className="dropdown-item-hover"
-                                  >
-                                    ℹ️ Details
-                                  </button>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleShare(file.id);
-                                      setActiveMenuFileId(null);
-                                    }}
-                                    style={{
-                                      width: "100%",
-                                      textAlign: "left",
-                                      background: "none",
-                                      border: "none",
-                                      color: "var(--text-primary)",
-                                      fontSize: "0.74rem",
-                                      fontWeight: 700,
-                                      padding: "0.4rem 0.6rem",
-                                      borderRadius: "6px",
-                                      cursor: "pointer",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      gap: "0.35rem",
-                                    }}
-                                    className="dropdown-item-hover"
-                                  >
-                                    🔗 Share
-                                  </button>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleDownload(file.id, file.fileName);
-                                      setActiveMenuFileId(null);
-                                    }}
-                                    style={{
-                                      width: "100%",
-                                      textAlign: "left",
-                                      background: "none",
-                                      border: "none",
-                                      color: "var(--text-primary)",
-                                      fontSize: "0.74rem",
-                                      fontWeight: 700,
-                                      padding: "0.4rem 0.6rem",
-                                      borderRadius: "6px",
-                                      cursor: "pointer",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      gap: "0.35rem",
-                                    }}
-                                    className="dropdown-item-hover"
-                                  >
-                                    ⬇️ Download
-                                  </button>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleMoveToTrash(file);
-                                      setActiveMenuFileId(null);
-                                    }}
-                                    style={{
-                                      width: "100%",
-                                      textAlign: "left",
-                                      background: "none",
-                                      border: "none",
-                                      color: "#EF4444",
-                                      fontSize: "0.74rem",
-                                      fontWeight: 700,
-                                      padding: "0.4rem 0.6rem",
-                                      borderRadius: "6px",
-                                      cursor: "pointer",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      gap: "0.35rem",
-                                    }}
-                                    className="dropdown-item-hover"
-                                  >
-                                    🗑️ Delete
-                                  </button>
-                                </div>
-                              )}
                             </div>
                           </div>
 
+                          {/* Float dropdown outside Preview Container to completely prevent z-index clipping */}
+                          {activeMenuFileId === file.id && (
+                            <div
+                              style={{
+                                position: "absolute",
+                                right: "0.4rem",
+                                top: "2.3rem",
+                                background: darkMode ? "#1e293b" : "#ffffff",
+                                border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
+                                borderRadius: "8px",
+                                padding: "0.3rem",
+                                zIndex: 100,
+                                boxShadow: darkMode ? "0 10px 15px -3px rgba(0, 0, 0, 0.3)" : "0 10px 15px -3px rgba(15, 23, 42, 0.08)",
+                                minWidth: "120px",
+                              }}
+                            >
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedDetailsFile(file);
+                                  setActiveMenuFileId(null);
+                                }}
+                                style={{
+                                  width: "100%",
+                                  textAlign: "left",
+                                  background: "none",
+                                  border: "none",
+                                  color: darkMode ? "#ffffff" : "#0f172a",
+                                  fontSize: "0.74rem",
+                                  fontWeight: 700,
+                                  padding: "0.4rem 0.6rem",
+                                  borderRadius: "6px",
+                                  cursor: "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "0.35rem",
+                                }}
+                                className="dropdown-item-hover"
+                              >
+                                <svg style={{ width: "0.95rem", height: "0.95rem", color: darkMode ? "#cbd5e1" : "#475569" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                  <circle cx="12" cy="12" r="10"/>
+                                  <line x1="12" y1="16" x2="12" y2="12"/>
+                                  <line x1="12" y1="8" x2="12.01" y2="8"/>
+                                </svg>
+                                <span>Details</span>
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleShare(file.id);
+                                  setActiveMenuFileId(null);
+                                }}
+                                style={{
+                                  width: "100%",
+                                  textAlign: "left",
+                                  background: "none",
+                                  border: "none",
+                                  color: darkMode ? "#ffffff" : "#0f172a",
+                                  fontSize: "0.74rem",
+                                  fontWeight: 700,
+                                  padding: "0.4rem 0.6rem",
+                                  borderRadius: "6px",
+                                  cursor: "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "0.5rem",
+                                }}
+                                className="dropdown-item-hover"
+                              >
+                                <svg style={{ width: "0.95rem", height: "0.95rem", color: darkMode ? "#cbd5e1" : "#475569" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                                </svg>
+                                <span>Share</span>
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDownload(file.id, file.fileName);
+                                  setActiveMenuFileId(null);
+                                }}
+                                style={{
+                                  width: "100%",
+                                  textAlign: "left",
+                                  background: "none",
+                                  border: "none",
+                                  color: darkMode ? "#ffffff" : "#0f172a",
+                                  fontSize: "0.74rem",
+                                  fontWeight: 700,
+                                  padding: "0.4rem 0.6rem",
+                                  borderRadius: "6px",
+                                  cursor: "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "0.5rem",
+                                }}
+                                className="dropdown-item-hover"
+                              >
+                                <svg style={{ width: "0.95rem", height: "0.95rem", color: darkMode ? "#cbd5e1" : "#475569" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 3v12"/>
+                                </svg>
+                                <span>Download</span>
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleMoveToTrash(file);
+                                  setActiveMenuFileId(null);
+                                }}
+                                style={{
+                                  width: "100%",
+                                  textAlign: "left",
+                                  background: "none",
+                                  border: "none",
+                                  color: "#EF4444",
+                                  fontSize: "0.74rem",
+                                  fontWeight: 700,
+                                  padding: "0.4rem 0.6rem",
+                                  borderRadius: "6px",
+                                  cursor: "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "0.5rem",
+                                }}
+                                className="dropdown-item-hover"
+                              >
+                                <svg style={{ width: "0.95rem", height: "0.95rem", color: "#EF4444" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="3 6 5 6 21 6"/>
+                                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                  <line x1="10" y1="11" x2="10" y2="17"/>
+                                  <line x1="14" y1="11" x2="14" y2="17"/>
+                                </svg>
+                                <span>Delete</span>
+                              </button>
+                            </div>
+                          )}
+
                           {/* File metadata description below */}
-                          <div style={{ display: "flex", flexDirection: "column", minWidth: 0, padding: "0.1rem 0.2rem" }}>
+                          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", minWidth: 0, padding: "0.1rem 0.2rem" }}>
                             <p
                               style={{
                                 fontSize: "0.78rem",
                                 fontWeight: 700,
-                                color: "var(--text-primary)",
+                                color: darkMode ? "#ffffff" : "#0f172a",
                                 margin: 0,
                                 overflow: "hidden",
                                 textOverflow: "ellipsis",
                                 whiteSpace: "nowrap",
+                                width: "100%",
                                 fontFamily: "var(--font-outfit)"
                               }}
                               title={file.fileName}
                             >
                               {file.fileName}
                             </p>
+                            <span
+                              style={{
+                                fontSize: "0.68rem",
+                                color: darkMode ? "#94a3b8" : "#64748b",
+                                fontWeight: 600,
+                                marginTop: "0.15rem"
+                              }}
+                            >
+                              {formatBytes(file.fileSize)}
+                            </span>
                           </div>
                         </div>
                       );
@@ -2276,6 +2941,18 @@ function DashboardContent() {
                     getRelativeTime={getRelativeTime}
                     activeMenuFileId={activeMenuFileId}
                     setActiveMenuFileId={setActiveMenuFileId}
+                    darkMode={darkMode}
+                    onFileClick={(file) => {
+                      if (isImageFile(file)) {
+                        setActiveImageViewerFileId(file.id);
+                        setImageZoom(1);
+                        setImageRotation(0);
+                        setImageFlipH(false);
+                        setImageFlipV(false);
+                      } else {
+                        setSelectedDetailsFile(file);
+                      }
+                    }}
                   />
                 )}
               </div>
@@ -2555,6 +3232,374 @@ function DashboardContent() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Premium Lightweight Image Viewer Modal */}
+      {activeImageViewerFileId && currentViewerImage && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background: "rgba(8, 10, 18, 0.93)",
+            backdropFilter: "blur(12px)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "space-between",
+            zIndex: 10000,
+            padding: "1rem",
+            userSelect: "none",
+          }}
+          onClick={() => setActiveImageViewerFileId(null)}
+        >
+          {/* Header Toolbar */}
+          <div
+            style={{
+              width: "100%",
+              maxWidth: "1200px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              zIndex: 10,
+              background: "rgba(30, 41, 59, 0.4)",
+              border: "1px solid rgba(255, 255, 255, 0.08)",
+              borderRadius: "12px",
+              padding: "0.6rem 1rem",
+              fontFamily: "var(--font-outfit)",
+              backdropFilter: "blur(8px)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+              <span
+                style={{
+                  fontSize: "0.82rem",
+                  fontWeight: 800,
+                  color: "#ffffff",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {currentViewerImage.fileName}
+              </span>
+              <span style={{ fontSize: "0.68rem", color: "#94a3b8", fontWeight: 600 }}>
+                {formatBytes(currentViewerImage.fileSize)} • {isViewerVideo ? "Video" : "Image"} {currentViewerIndex + 1} of {activeImages.length}
+              </span>
+            </div>
+
+            {/* Viewer action controls */}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+              {!isViewerVideo && (
+                <>
+                  <button
+                    onClick={() => setImageZoom((z) => Math.max(z - 0.25, 0.5))}
+                    style={{ background: "rgba(255, 255, 255, 0.06)", border: "none", color: "#e2e8f0", padding: "0.45rem", borderRadius: "8px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                    title="Zoom Out (-)"
+                  >
+                    <svg style={{ width: "0.95rem", height: "0.95rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M18 12H6" />
+                    </svg>
+                  </button>
+
+                  <button
+                    onClick={() => setImageZoom((z) => Math.min(z + 0.25, 4))}
+                    style={{ background: "rgba(255, 255, 255, 0.06)", border: "none", color: "#e2e8f0", padding: "0.45rem", borderRadius: "8px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                    title="Zoom In (+)"
+                  >
+                    <svg style={{ width: "0.95rem", height: "0.95rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m6-6H6" />
+                    </svg>
+                  </button>
+
+                  <button
+                    onClick={() => setImageRotation((r) => (r + 90) % 360)}
+                    style={{ background: "rgba(255, 255, 255, 0.06)", border: "none", color: "#e2e8f0", padding: "0.45rem", borderRadius: "8px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                    title="Rotate 90°"
+                  >
+                    <svg style={{ width: "0.95rem", height: "0.95rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89M9 11l3-3 3 3" />
+                    </svg>
+                  </button>
+
+                  <button
+                    onClick={() => setImageFlipH((f) => !f)}
+                    style={{ background: "rgba(255, 255, 255, 0.06)", border: "none", color: "#e2e8f0", padding: "0.45rem", borderRadius: "8px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                    title="Flip Horizontal"
+                  >
+                    <svg style={{ width: "0.95rem", height: "0.95rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                    </svg>
+                  </button>
+
+                  <button
+                    onClick={() => setImageFlipV((f) => !f)}
+                    style={{ background: "rgba(255, 255, 255, 0.06)", border: "none", color: "#e2e8f0", padding: "0.45rem", borderRadius: "8px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                    title="Flip Vertical"
+                  >
+                    <svg style={{ width: "0.95rem", height: "0.95rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M7 8v12m0 0l-4-4m4 4l4-4m6 0V4m0 0l4 4m-4-4l-4 4" />
+                    </svg>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setImageZoom(1);
+                      setImageRotation(0);
+                      setImageFlipH(false);
+                      setImageFlipV(false);
+                    }}
+                    style={{ background: "rgba(255, 255, 255, 0.06)", border: "none", color: "#e2e8f0", padding: "0.45rem", borderRadius: "8px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                    title="Reset View"
+                  >
+                    <svg style={{ width: "0.95rem", height: "0.95rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                  </button>
+                </>
+              )}
+
+              <button
+                onClick={() => handleDownload(currentViewerImage.id, currentViewerImage.fileName)}
+                style={{ background: "rgba(245, 158, 11, 0.2)", border: "1px solid rgba(245, 158, 11, 0.3)", color: "#FBBF24", padding: "0.45rem", borderRadius: "8px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                title="Download"
+              >
+                <svg style={{ width: "0.95rem", height: "0.95rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              </button>
+
+              <div style={{ width: "1px", height: "20px", background: "rgba(255,255,255,0.15)", margin: "0 0.2rem" }} />
+
+              <button
+                onClick={() => setActiveImageViewerFileId(null)}
+                style={{ background: "rgba(239, 68, 68, 0.2)", border: "none", color: "#f87171", padding: "0.45rem", borderRadius: "8px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                title="Close (Esc)"
+              >
+                <svg style={{ width: "0.95rem", height: "0.95rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {/* Main Viewer area */}
+          <div
+            style={{
+              position: "relative",
+              flex: 1,
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              overflow: "hidden",
+            }}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setActiveImageViewerFileId(null);
+              }
+            }}
+          >
+            {/* Previous Image Chevron */}
+            {currentViewerIndex > 0 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handlePrevViewerImage();
+                }}
+                style={{
+                  position: "absolute",
+                  left: "1.5rem",
+                  background: "rgba(30, 41, 59, 0.6)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  color: "#ffffff",
+                  padding: "0.8rem",
+                  borderRadius: "50%",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 20,
+                  transition: "all 0.2s ease",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+                }}
+                className="dropdown-item-hover"
+                title="Previous (←)"
+              >
+                <svg style={{ width: "1.1rem", height: "1.1rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+            )}
+
+            {/* Media Canvas with Premium Styles */}
+            <div
+              style={{
+                position: "relative",
+                width: isViewerVideo ? "90vw" : "auto",
+                maxWidth: isViewerVideo ? "1080px" : "85%",
+                maxHeight: "85%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: "12px",
+                overflow: isViewerVideo ? "visible" : "hidden",
+                boxShadow: isViewerVideo ? "none" : "0 25px 50px -12px rgba(0, 0, 0, 0.8)",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {isViewerVideo ? (
+                <div
+                  style={{
+                    position: "relative",
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                  onDoubleClick={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const width = rect.width;
+                    if (x < width / 2) {
+                      // Double click on left half -> Rewind 10s
+                      if (videoRef.current) {
+                        videoRef.current.currentTime = Math.max(videoRef.current.currentTime - 10, 0);
+                        showToast("info", "Rewind 10s ↩️");
+                      }
+                    } else {
+                      // Double click on right half -> Fast Forward 10s
+                      if (videoRef.current) {
+                        videoRef.current.currentTime = Math.min(videoRef.current.currentTime + 10, videoRef.current.duration || 0);
+                        showToast("info", "Forward 10s ↪️");
+                      }
+                    }
+                  }}
+                >
+                  <video
+                    ref={videoRef}
+                    src={`/api/files/${currentViewerImage.id}`}
+                    controls
+                    autoPlay
+                    onSeeking={() => setIsVideoBuffering(true)}
+                    onSeeked={() => setIsVideoBuffering(false)}
+                    onWaiting={() => setIsVideoBuffering(true)}
+                    onPlaying={() => setIsVideoBuffering(false)}
+                    onCanPlay={() => setIsVideoBuffering(false)}
+                    style={{
+                      width: "100%",
+                      height: "auto",
+                      maxHeight: "75vh",
+                      borderRadius: "12px",
+                      boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.8)",
+                      outline: "none",
+                      backgroundColor: "#000000",
+                    }}
+                  />
+                  {isVideoBuffering && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: "rgba(0, 0, 0, 0.45)",
+                        borderRadius: "12px",
+                        zIndex: 5,
+                        pointerEvents: "none",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: "48px",
+                          height: "48px",
+                          borderRadius: "50%",
+                          border: "4px solid rgba(255, 255, 255, 0.2)",
+                          borderTopColor: "#3b82f6",
+                          animation: "spin 0.8s linear infinite",
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <img
+                  src={`/api/files/${currentViewerImage.id}`}
+                  alt={currentViewerImage.fileName}
+                  style={{
+                    maxWidth: "100%",
+                    maxHeight: "80vh",
+                    objectFit: "contain",
+                    transform: `scale(${imageZoom}) rotate(${imageRotation}deg) scaleX(${imageFlipH ? -1 : 1}) scaleY(${imageFlipV ? -1 : 1})`,
+                    transition: "transform 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+                    pointerEvents: "none",
+                  }}
+                />
+              )}
+            </div>
+
+            {/* Next Image Chevron */}
+            {currentViewerIndex < activeImages.length - 1 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleNextViewerImage();
+                }}
+                style={{
+                  position: "absolute",
+                  right: "1.5rem",
+                  background: "rgba(30, 41, 59, 0.6)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  color: "#ffffff",
+                  padding: "0.8rem",
+                  borderRadius: "50%",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 20,
+                  transition: "all 0.2s ease",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+                }}
+                className="dropdown-item-hover"
+                title="Next (→)"
+              >
+                <svg style={{ width: "1.1rem", height: "1.1rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          {/* Footer Info Display */}
+          <div
+            style={{
+              padding: "0.5rem 1rem",
+              background: "rgba(15, 23, 42, 0.6)",
+              borderRadius: "20px",
+              fontSize: "0.72rem",
+              color: "#94a3b8",
+              fontFamily: "var(--font-outfit)",
+              border: "1px solid rgba(255, 255, 255, 0.05)",
+              zIndex: 10,
+              marginBottom: "0.5rem",
+            }}
+          >
+            {isViewerVideo ? (
+              <span>Video Player • Controls: Arrow Keys (Nav) • Esc (Exit) • Native Player Controls (Play/Pause, Fullscreen)</span>
+            ) : (
+              <span>Zoom: {Math.round(imageZoom * 100)}% • Rotation: {imageRotation}° • Controls: Arrow Keys (Nav) • Esc (Exit) • +/- (Zoom)</span>
+            )}
           </div>
         </div>
       )}

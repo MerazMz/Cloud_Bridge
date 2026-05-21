@@ -137,6 +137,15 @@ export function CommandPalette({
         onClose();
       },
     },
+    {
+      id: "nav-settings",
+      label: "Go to Portal Settings",
+      category: "Navigation",
+      action: () => {
+        onNavigate("settings");
+        onClose();
+      },
+    },
     // System utility group
     {
       id: "util-upload",

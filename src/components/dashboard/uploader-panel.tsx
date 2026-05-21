@@ -10,6 +10,7 @@ interface UploaderPanelProps {
   isDragActive: boolean;
   handleDrag: (e: DragEvent<HTMLDivElement>) => void;
   handleDrop: (e: DragEvent<HTMLDivElement>) => void;
+  onCreateFolder?: () => void;
 }
 
 export function UploaderPanel({
@@ -20,6 +21,7 @@ export function UploaderPanel({
   isDragActive,
   handleDrag,
   handleDrop,
+  onCreateFolder,
 }: UploaderPanelProps) {
   return (
     <section style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "1.15rem", width: "100%" }}>
@@ -41,11 +43,11 @@ export function UploaderPanel({
 
           <button
             className="glass-card card-hover"
-            onClick={() => alert("Creating custom folder directories is coming soon!")}
+            onClick={onCreateFolder || (() => alert("Creating custom folder directories is coming soon!"))}
             style={{ display: "flex", alignItems: "center", gap: "0.6rem", padding: "0.65rem 0.85rem", borderRadius: "10px", border: "1px solid var(--border-default)", background: "transparent", cursor: "pointer", transition: "all 0.2s ease", textAlign: "left" }}
           >
-            <div style={{ width: "30px", height: "30px", borderRadius: "6px", background: "rgba(100, 116, 139, 0.06)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <svg style={{ width: "1rem", height: "1rem", color: "#64748B" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            <div style={{ width: "30px", height: "30px", borderRadius: "6px", background: "rgba(245, 158, 11, 0.08)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <svg style={{ width: "1rem", height: "1rem", color: "#F59E0B" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
             </div>
             <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--text-primary)" }}>Create Folder</span>
           </button>

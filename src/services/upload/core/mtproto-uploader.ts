@@ -17,6 +17,7 @@ export interface UploadOptions {
   fileName: string;
   fileSize: number;
   workers?: number;
+  checkCancelled?: () => Promise<boolean>;
   onProgress?: (percent: number, uploadedBytes: number, speed: string, eta: string) => void;
 }
 
@@ -55,6 +56,24 @@ export async function uploadToTelegramStream(options: UploadOptions): Promise<an
     return new Promise<any>(async (resolve, reject) => {
       async function startNextWorker() {
         if (hasFailed) return;
+
+        // Perform cancellation check
+        if (options.checkCancelled) {
+          try {
+            const isCancelled = await options.checkCancelled();
+            if (isCancelled) {
+              hasFailed = true;
+              uploadError = new Error("Upload cancelled");
+              try {
+                await fHandle.close();
+              } catch {}
+              reject(uploadError);
+              return;
+            }
+          } catch (cancelErr) {
+            log.error("Failed to run cancellation check", cancelErr);
+          }
+        }
 
         if (nextIndex >= partCount) {
           if (activeWorkers === 0 && !hasFailed) {
