@@ -57,6 +57,11 @@ export type Session = Prisma.SessionModel
  */
 export type File = Prisma.FileModel
 /**
+ * Model FileEmbedding
+ * 
+ */
+export type FileEmbedding = Prisma.FileEmbeddingModel
+/**
  * Model UploadJob
  * 
  */

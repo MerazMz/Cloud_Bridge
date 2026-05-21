@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { Api } from "telegram";
 import bigInt from "big-integer";
 import { createLogger } from "@/lib/logger";
+import { SemanticSearchService } from "@/services/semantic-search/semantic-search.service";
 
 const log = createLogger("UploadWorkerPool");
 
@@ -186,7 +187,7 @@ class UploadWorkerPool {
       }
 
       // 5. Register file details in the main File table scoped to parent directory if applicable
-      await prisma.file.create({
+      const fileRecord = await prisma.file.create({
         data: {
           userId: job.userId,
           telegramMessageId: message.id,
@@ -196,6 +197,31 @@ class UploadWorkerPool {
           parentId: job.parentId || null,
         },
       });
+
+      // Generate and save semantic search embedding
+      try {
+        log.info("Generating semantic embedding for file", { fileId: fileRecord.id, fileName: job.fileName });
+        let action: "image" | "video" | "file" = "file";
+        if (mimeType.startsWith("image/")) {
+          action = "image";
+        } else if (mimeType.startsWith("video/")) {
+          action = "video";
+        }
+
+        const embedding = await SemanticSearchService.generateEmbedding({
+          action,
+          filepath: job.tempFilePath,
+          filename: job.fileName,
+        });
+
+        await SemanticSearchService.saveEmbedding(fileRecord.id, job.userId, embedding);
+        log.info("Semantic embedding generated and saved successfully", { fileId: fileRecord.id });
+      } catch (embedErr: any) {
+        log.error("Failed to generate/save semantic embedding for file during upload", {
+          fileId: fileRecord.id,
+          error: embedErr.message,
+        });
+      }
 
       // 6. Complete job and clean up temp files
       await UploadJobQueue.completeJob(job.id);

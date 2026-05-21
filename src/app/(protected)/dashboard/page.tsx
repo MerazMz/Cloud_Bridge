@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, ChangeEvent, DragEvent, Suspense } from "react";
 import { useAuth } from "@/hooks/use-auth";
+import { useSemanticSearch } from "@/hooks/use-semantic-search";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useToast } from "@/components/ui/toast";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -17,14 +18,7 @@ import { RecentFilesTable } from "@/components/dashboard/recent-files-table";
 import { CommandPalette } from "@/components/dashboard/command-palette";
 import { VideoThumbnail } from "@/components/dashboard/video-thumbnail";
 
-export interface DBFile {
-  id: string;
-  fileName: string;
-  fileSize: number;
-  mimeType: string;
-  isDeleted?: boolean;
-  createdAt: string;
-}
+import { DBFile } from "@/types/file.types";
 
 export interface NotificationItem {
   id: string;
@@ -52,10 +46,16 @@ function DashboardContent() {
   const router = useRouter();
   const tab = searchParams.get("tab") || "dashboard";
 
+  const {
+    searchTerm,
+    setSearchTerm,
+    loading: semanticSearchLoading,
+    results: semanticSearchResults,
+  } = useSemanticSearch("", 600);
+
   const [files, setFiles] = useState<DBFile[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
   const [isDragActive, setIsDragActive] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [deletingIds, setDeletingIds] = useState<Record<string, boolean>>({});
@@ -268,6 +268,22 @@ function DashboardContent() {
       fetchFiles(currentFolderId);
     }
   }, [user, currentFolderId]);
+
+  // Trigger background embedding backfill on user authentication
+  useEffect(() => {
+    if (user) {
+      fetch("/api/files/backfill", { method: "POST" })
+        .then(async (res) => {
+          const json = await res.json();
+          if (json.success) {
+            console.log("Embedding backfill check completed:", json.message);
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to check/trigger embedding backfill:", err);
+        });
+    }
+  }, [user]);
 
   // Sequential Upload Queue Runner Effect Hook
   useEffect(() => {
@@ -1010,10 +1026,10 @@ function DashboardContent() {
     else if (selectedFolderCategory === "others") visibleFiles = otherFiles;
   }
 
-  // Filter visible files by search bar
-  const finalFilteredFiles = visibleFiles.filter((f) =>
-    f.fileName.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Filter visible files: use semantic search results if search query is active (except in Trash tab)
+  const finalFilteredFiles = tab === "trash"
+    ? visibleFiles.filter((f) => f.fileName.toLowerCase().includes(searchTerm.toLowerCase()))
+    : (searchTerm.trim() ? semanticSearchResults : visibleFiles);
 
   // Helper renderer for trash bin list
   function renderTrashTable(fileList: DBFile[]) {
@@ -1971,13 +1987,25 @@ function DashboardContent() {
                 )}
 
                 {viewMode === "grid" ? (
-                  <div style={{
-                    display: "grid",
-                    gridTemplateColumns: `repeat(auto-fill, minmax(${gridSize}px, 1fr))`,
-                    gap: "1.2rem",
-                    padding: "0.25rem 0",
-                  }}>
-                    {((tab === "dashboard" || tab === "my-files") ? finalFilteredFiles.filter((f) => f.mimeType !== "folder") : finalFilteredFiles).map((file) => {
+                  (filesLoading || semanticSearchLoading) && finalFilteredFiles.length === 0 ? (
+                    <div style={{ padding: "3rem 0", display: "flex", justifyContent: "center", width: "100%" }}>
+                      <LoadingSpinner size="md" label="Searching files semantically..." />
+                    </div>
+                  ) : ((tab === "dashboard" || tab === "my-files") ? finalFilteredFiles.filter((f) => f.mimeType !== "folder") : finalFilteredFiles).length === 0 ? (
+                    <div style={{ padding: "3rem 0", textAlign: "center", width: "100%" }}>
+                      <span style={{ fontSize: "2rem" }}>📭</span>
+                      <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginTop: "0.5rem" }}>
+                        No files matching your search were found.
+                      </p>
+                    </div>
+                  ) : (
+                    <div style={{
+                      display: "grid",
+                      gridTemplateColumns: `repeat(auto-fill, minmax(${gridSize}px, 1fr))`,
+                      gap: "1.2rem",
+                      padding: "0.25rem 0",
+                    }}>
+                      {((tab === "dashboard" || tab === "my-files") ? finalFilteredFiles.filter((f) => f.mimeType !== "folder") : finalFilteredFiles).map((file) => {
                       const isStarred = favorites.includes(file.id);
                       const fileStyle = getFileStyle(file.mimeType, file.fileName);
                       
@@ -2258,10 +2286,10 @@ function DashboardContent() {
                       );
                     })}
                   </div>
-                ) : (
+                  )) : (
                   <RecentFilesTable
                     fileList={(tab === "dashboard" || tab === "my-files") ? finalFilteredFiles.filter((f) => f.mimeType !== "folder") : finalFilteredFiles}
-                    filesLoading={filesLoading}
+                    filesLoading={filesLoading || semanticSearchLoading}
                     deletingIds={deletingIds}
                     downloadingIds={downloadingIds}
                     favorites={favorites}

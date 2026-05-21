@@ -4,13 +4,7 @@ import { useState, useRef, DragEvent, ChangeEvent } from "react";
 import { LoadingSpinner } from "../ui/loading-spinner";
 import { useToast } from "@/components/ui/toast";
 
-export interface DBFile {
-  id: string;
-  fileName: string;
-  fileSize: number;
-  mimeType: string;
-  createdAt: string;
-}
+import { DBFile } from "@/types/file.types";
 
 interface FileExplorerProps {
   files: DBFile[];

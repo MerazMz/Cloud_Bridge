@@ -74,8 +74,7 @@ export function DashboardHeader({
     <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1.25rem", width: "100%" }}>
       {/* Search Bar */}
       <div
-        onClick={onSearchClick}
-        style={{ position: "relative", width: "360px", cursor: "pointer" }}
+        style={{ position: "relative", width: "360px" }}
       >
         <span style={{ position: "absolute", left: "0.8rem", top: "50%", transform: "translateY(-50%)", fontSize: "0.9rem", color: "var(--text-muted)", display: "flex", alignItems: "center" }}>
           <svg style={{ width: "1rem", height: "1rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
@@ -87,14 +86,6 @@ export function DashboardHeader({
           placeholder="Search files and folders..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          onClick={(e) => {
-            e.stopPropagation();
-            onSearchClick();
-          }}
-          onFocus={(e) => {
-            e.target.blur();
-            onSearchClick();
-          }}
           className="input-field"
           style={{
             paddingLeft: "2.2rem",
@@ -105,10 +96,14 @@ export function DashboardHeader({
             background: "var(--bg-card)",
             fontSize: "0.85rem",
             letterSpacing: "-0.01em",
-            cursor: "pointer",
           }}
         />
-        <span style={{ position: "absolute", right: "0.8rem", top: "50%", transform: "translateY(-50%)", fontSize: "0.7rem", fontWeight: 700, color: "var(--text-muted)", background: "var(--bg-secondary)", border: "1px solid var(--border-default)", borderRadius: "5px", padding: "0.1rem 0.3rem", letterSpacing: "-0.02em" }}>
+        <span
+          onClick={(e) => {
+            e.stopPropagation();
+            onSearchClick();
+          }}
+          style={{ position: "absolute", right: "0.8rem", top: "50%", transform: "translateY(-50%)", fontSize: "0.7rem", fontWeight: 700, color: "var(--text-muted)", background: "var(--bg-secondary)", border: "1px solid var(--border-default)", borderRadius: "5px", padding: "0.1rem 0.3rem", letterSpacing: "-0.02em", cursor: "pointer" }}>
           ⌘ K
         </span>
       </div>

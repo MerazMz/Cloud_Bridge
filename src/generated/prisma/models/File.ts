@@ -263,6 +263,7 @@ export type FileWhereInput = {
   user?: Prisma.XOR<Prisma.UserScalarRelationFilter, Prisma.UserWhereInput>
   parent?: Prisma.XOR<Prisma.FileNullableScalarRelationFilter, Prisma.FileWhereInput> | null
   children?: Prisma.FileListRelationFilter
+  embedding?: Prisma.XOR<Prisma.FileEmbeddingNullableScalarRelationFilter, Prisma.FileEmbeddingWhereInput> | null
 }
 
 export type FileOrderByWithRelationInput = {
@@ -279,6 +280,7 @@ export type FileOrderByWithRelationInput = {
   user?: Prisma.UserOrderByWithRelationInput
   parent?: Prisma.FileOrderByWithRelationInput
   children?: Prisma.FileOrderByRelationAggregateInput
+  embedding?: Prisma.FileEmbeddingOrderByWithRelationInput
 }
 
 export type FileWhereUniqueInput = Prisma.AtLeast<{
@@ -298,6 +300,7 @@ export type FileWhereUniqueInput = Prisma.AtLeast<{
   user?: Prisma.XOR<Prisma.UserScalarRelationFilter, Prisma.UserWhereInput>
   parent?: Prisma.XOR<Prisma.FileNullableScalarRelationFilter, Prisma.FileWhereInput> | null
   children?: Prisma.FileListRelationFilter
+  embedding?: Prisma.XOR<Prisma.FileEmbeddingNullableScalarRelationFilter, Prisma.FileEmbeddingWhereInput> | null
 }, "id">
 
 export type FileOrderByWithAggregationInput = {
@@ -346,6 +349,7 @@ export type FileCreateInput = {
   user: Prisma.UserCreateNestedOneWithoutFilesInput
   parent?: Prisma.FileCreateNestedOneWithoutChildrenInput
   children?: Prisma.FileCreateNestedManyWithoutParentInput
+  embedding?: Prisma.FileEmbeddingCreateNestedOneWithoutFileInput
 }
 
 export type FileUncheckedCreateInput = {
@@ -360,6 +364,7 @@ export type FileUncheckedCreateInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   children?: Prisma.FileUncheckedCreateNestedManyWithoutParentInput
+  embedding?: Prisma.FileEmbeddingUncheckedCreateNestedOneWithoutFileInput
 }
 
 export type FileUpdateInput = {
@@ -374,6 +379,7 @@ export type FileUpdateInput = {
   user?: Prisma.UserUpdateOneRequiredWithoutFilesNestedInput
   parent?: Prisma.FileUpdateOneWithoutChildrenNestedInput
   children?: Prisma.FileUpdateManyWithoutParentNestedInput
+  embedding?: Prisma.FileEmbeddingUpdateOneWithoutFileNestedInput
 }
 
 export type FileUncheckedUpdateInput = {
@@ -388,6 +394,7 @@ export type FileUncheckedUpdateInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   children?: Prisma.FileUncheckedUpdateManyWithoutParentNestedInput
+  embedding?: Prisma.FileEmbeddingUncheckedUpdateOneWithoutFileNestedInput
 }
 
 export type FileCreateManyInput = {
@@ -489,6 +496,11 @@ export type FileMinOrderByAggregateInput = {
 export type FileSumOrderByAggregateInput = {
   telegramMessageId?: Prisma.SortOrder
   fileSize?: Prisma.SortOrder
+}
+
+export type FileScalarRelationFilter = {
+  is?: Prisma.FileWhereInput
+  isNot?: Prisma.FileWhereInput
 }
 
 export type FileCreateNestedManyWithoutUserInput = {
@@ -603,6 +615,20 @@ export type FileUncheckedUpdateManyWithoutParentNestedInput = {
   deleteMany?: Prisma.FileScalarWhereInput | Prisma.FileScalarWhereInput[]
 }
 
+export type FileCreateNestedOneWithoutEmbeddingInput = {
+  create?: Prisma.XOR<Prisma.FileCreateWithoutEmbeddingInput, Prisma.FileUncheckedCreateWithoutEmbeddingInput>
+  connectOrCreate?: Prisma.FileCreateOrConnectWithoutEmbeddingInput
+  connect?: Prisma.FileWhereUniqueInput
+}
+
+export type FileUpdateOneRequiredWithoutEmbeddingNestedInput = {
+  create?: Prisma.XOR<Prisma.FileCreateWithoutEmbeddingInput, Prisma.FileUncheckedCreateWithoutEmbeddingInput>
+  connectOrCreate?: Prisma.FileCreateOrConnectWithoutEmbeddingInput
+  upsert?: Prisma.FileUpsertWithoutEmbeddingInput
+  connect?: Prisma.FileWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.FileUpdateToOneWithWhereWithoutEmbeddingInput, Prisma.FileUpdateWithoutEmbeddingInput>, Prisma.FileUncheckedUpdateWithoutEmbeddingInput>
+}
+
 export type FileCreateWithoutUserInput = {
   id?: string
   telegramMessageId: number
@@ -614,6 +640,7 @@ export type FileCreateWithoutUserInput = {
   updatedAt?: Date | string
   parent?: Prisma.FileCreateNestedOneWithoutChildrenInput
   children?: Prisma.FileCreateNestedManyWithoutParentInput
+  embedding?: Prisma.FileEmbeddingCreateNestedOneWithoutFileInput
 }
 
 export type FileUncheckedCreateWithoutUserInput = {
@@ -627,6 +654,7 @@ export type FileUncheckedCreateWithoutUserInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   children?: Prisma.FileUncheckedCreateNestedManyWithoutParentInput
+  embedding?: Prisma.FileEmbeddingUncheckedCreateNestedOneWithoutFileInput
 }
 
 export type FileCreateOrConnectWithoutUserInput = {
@@ -682,6 +710,7 @@ export type FileCreateWithoutChildrenInput = {
   updatedAt?: Date | string
   user: Prisma.UserCreateNestedOneWithoutFilesInput
   parent?: Prisma.FileCreateNestedOneWithoutChildrenInput
+  embedding?: Prisma.FileEmbeddingCreateNestedOneWithoutFileInput
 }
 
 export type FileUncheckedCreateWithoutChildrenInput = {
@@ -695,6 +724,7 @@ export type FileUncheckedCreateWithoutChildrenInput = {
   parentId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
+  embedding?: Prisma.FileEmbeddingUncheckedCreateNestedOneWithoutFileInput
 }
 
 export type FileCreateOrConnectWithoutChildrenInput = {
@@ -713,6 +743,7 @@ export type FileCreateWithoutParentInput = {
   updatedAt?: Date | string
   user: Prisma.UserCreateNestedOneWithoutFilesInput
   children?: Prisma.FileCreateNestedManyWithoutParentInput
+  embedding?: Prisma.FileEmbeddingCreateNestedOneWithoutFileInput
 }
 
 export type FileUncheckedCreateWithoutParentInput = {
@@ -726,6 +757,7 @@ export type FileUncheckedCreateWithoutParentInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   children?: Prisma.FileUncheckedCreateNestedManyWithoutParentInput
+  embedding?: Prisma.FileEmbeddingUncheckedCreateNestedOneWithoutFileInput
 }
 
 export type FileCreateOrConnectWithoutParentInput = {
@@ -760,6 +792,7 @@ export type FileUpdateWithoutChildrenInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   user?: Prisma.UserUpdateOneRequiredWithoutFilesNestedInput
   parent?: Prisma.FileUpdateOneWithoutChildrenNestedInput
+  embedding?: Prisma.FileEmbeddingUpdateOneWithoutFileNestedInput
 }
 
 export type FileUncheckedUpdateWithoutChildrenInput = {
@@ -773,6 +806,7 @@ export type FileUncheckedUpdateWithoutChildrenInput = {
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  embedding?: Prisma.FileEmbeddingUncheckedUpdateOneWithoutFileNestedInput
 }
 
 export type FileUpsertWithWhereUniqueWithoutParentInput = {
@@ -789,6 +823,78 @@ export type FileUpdateWithWhereUniqueWithoutParentInput = {
 export type FileUpdateManyWithWhereWithoutParentInput = {
   where: Prisma.FileScalarWhereInput
   data: Prisma.XOR<Prisma.FileUpdateManyMutationInput, Prisma.FileUncheckedUpdateManyWithoutParentInput>
+}
+
+export type FileCreateWithoutEmbeddingInput = {
+  id?: string
+  telegramMessageId: number
+  fileName: string
+  fileSize: bigint | number
+  mimeType: string
+  isDeleted?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  user: Prisma.UserCreateNestedOneWithoutFilesInput
+  parent?: Prisma.FileCreateNestedOneWithoutChildrenInput
+  children?: Prisma.FileCreateNestedManyWithoutParentInput
+}
+
+export type FileUncheckedCreateWithoutEmbeddingInput = {
+  id?: string
+  userId: string
+  telegramMessageId: number
+  fileName: string
+  fileSize: bigint | number
+  mimeType: string
+  isDeleted?: boolean
+  parentId?: string | null
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  children?: Prisma.FileUncheckedCreateNestedManyWithoutParentInput
+}
+
+export type FileCreateOrConnectWithoutEmbeddingInput = {
+  where: Prisma.FileWhereUniqueInput
+  create: Prisma.XOR<Prisma.FileCreateWithoutEmbeddingInput, Prisma.FileUncheckedCreateWithoutEmbeddingInput>
+}
+
+export type FileUpsertWithoutEmbeddingInput = {
+  update: Prisma.XOR<Prisma.FileUpdateWithoutEmbeddingInput, Prisma.FileUncheckedUpdateWithoutEmbeddingInput>
+  create: Prisma.XOR<Prisma.FileCreateWithoutEmbeddingInput, Prisma.FileUncheckedCreateWithoutEmbeddingInput>
+  where?: Prisma.FileWhereInput
+}
+
+export type FileUpdateToOneWithWhereWithoutEmbeddingInput = {
+  where?: Prisma.FileWhereInput
+  data: Prisma.XOR<Prisma.FileUpdateWithoutEmbeddingInput, Prisma.FileUncheckedUpdateWithoutEmbeddingInput>
+}
+
+export type FileUpdateWithoutEmbeddingInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  telegramMessageId?: Prisma.IntFieldUpdateOperationsInput | number
+  fileName?: Prisma.StringFieldUpdateOperationsInput | string
+  fileSize?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  mimeType?: Prisma.StringFieldUpdateOperationsInput | string
+  isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  user?: Prisma.UserUpdateOneRequiredWithoutFilesNestedInput
+  parent?: Prisma.FileUpdateOneWithoutChildrenNestedInput
+  children?: Prisma.FileUpdateManyWithoutParentNestedInput
+}
+
+export type FileUncheckedUpdateWithoutEmbeddingInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  userId?: Prisma.StringFieldUpdateOperationsInput | string
+  telegramMessageId?: Prisma.IntFieldUpdateOperationsInput | number
+  fileName?: Prisma.StringFieldUpdateOperationsInput | string
+  fileSize?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  mimeType?: Prisma.StringFieldUpdateOperationsInput | string
+  isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  children?: Prisma.FileUncheckedUpdateManyWithoutParentNestedInput
 }
 
 export type FileCreateManyUserInput = {
@@ -814,6 +920,7 @@ export type FileUpdateWithoutUserInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   parent?: Prisma.FileUpdateOneWithoutChildrenNestedInput
   children?: Prisma.FileUpdateManyWithoutParentNestedInput
+  embedding?: Prisma.FileEmbeddingUpdateOneWithoutFileNestedInput
 }
 
 export type FileUncheckedUpdateWithoutUserInput = {
@@ -827,6 +934,7 @@ export type FileUncheckedUpdateWithoutUserInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   children?: Prisma.FileUncheckedUpdateManyWithoutParentNestedInput
+  embedding?: Prisma.FileEmbeddingUncheckedUpdateOneWithoutFileNestedInput
 }
 
 export type FileUncheckedUpdateManyWithoutUserInput = {
@@ -864,6 +972,7 @@ export type FileUpdateWithoutParentInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   user?: Prisma.UserUpdateOneRequiredWithoutFilesNestedInput
   children?: Prisma.FileUpdateManyWithoutParentNestedInput
+  embedding?: Prisma.FileEmbeddingUpdateOneWithoutFileNestedInput
 }
 
 export type FileUncheckedUpdateWithoutParentInput = {
@@ -877,6 +986,7 @@ export type FileUncheckedUpdateWithoutParentInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   children?: Prisma.FileUncheckedUpdateManyWithoutParentNestedInput
+  embedding?: Prisma.FileEmbeddingUncheckedUpdateOneWithoutFileNestedInput
 }
 
 export type FileUncheckedUpdateManyWithoutParentInput = {
@@ -936,6 +1046,7 @@ export type FileSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = r
   user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
   parent?: boolean | Prisma.File$parentArgs<ExtArgs>
   children?: boolean | Prisma.File$childrenArgs<ExtArgs>
+  embedding?: boolean | Prisma.File$embeddingArgs<ExtArgs>
   _count?: boolean | Prisma.FileCountOutputTypeDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["file"]>
 
@@ -987,6 +1098,7 @@ export type FileInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = 
   user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
   parent?: boolean | Prisma.File$parentArgs<ExtArgs>
   children?: boolean | Prisma.File$childrenArgs<ExtArgs>
+  embedding?: boolean | Prisma.File$embeddingArgs<ExtArgs>
   _count?: boolean | Prisma.FileCountOutputTypeDefaultArgs<ExtArgs>
 }
 export type FileIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
@@ -1004,6 +1116,7 @@ export type $FilePayload<ExtArgs extends runtime.Types.Extensions.InternalArgs =
     user: Prisma.$UserPayload<ExtArgs>
     parent: Prisma.$FilePayload<ExtArgs> | null
     children: Prisma.$FilePayload<ExtArgs>[]
+    embedding: Prisma.$FileEmbeddingPayload<ExtArgs> | null
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
@@ -1413,6 +1526,7 @@ export interface Prisma__FileClient<T, Null = never, ExtArgs extends runtime.Typ
   user<T extends Prisma.UserDefaultArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.UserDefaultArgs<ExtArgs>>): Prisma.Prisma__UserClient<runtime.Types.Result.GetResult<Prisma.$UserPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
   parent<T extends Prisma.File$parentArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.File$parentArgs<ExtArgs>>): Prisma.Prisma__FileClient<runtime.Types.Result.GetResult<Prisma.$FilePayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
   children<T extends Prisma.File$childrenArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.File$childrenArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$FilePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  embedding<T extends Prisma.File$embeddingArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.File$embeddingArgs<ExtArgs>>): Prisma.Prisma__FileEmbeddingClient<runtime.Types.Result.GetResult<Prisma.$FileEmbeddingPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -1893,6 +2007,25 @@ export type File$childrenArgs<ExtArgs extends runtime.Types.Extensions.InternalA
   take?: number
   skip?: number
   distinct?: Prisma.FileScalarFieldEnum | Prisma.FileScalarFieldEnum[]
+}
+
+/**
+ * File.embedding
+ */
+export type File$embeddingArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the FileEmbedding
+   */
+  select?: Prisma.FileEmbeddingSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the FileEmbedding
+   */
+  omit?: Prisma.FileEmbeddingOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.FileEmbeddingInclude<ExtArgs> | null
+  where?: Prisma.FileEmbeddingWhereInput
 }
 
 /**

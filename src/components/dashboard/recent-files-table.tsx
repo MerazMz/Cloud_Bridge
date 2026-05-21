@@ -1,7 +1,7 @@
 "use client";
 
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { DBFile } from "@/app/(protected)/dashboard/page";
+import { DBFile } from "@/types/file.types";
 import { VideoThumbnail } from "./video-thumbnail";
 
 interface RecentFilesTableProps {
@@ -179,19 +179,21 @@ export function RecentFilesTable({
                       </div>
                     );
                   })()}
-                  <span
-                    title={file.fileName}
-                    style={{
-                      fontWeight: 700,
-                      fontSize: "0.82rem",
-                      color: "var(--text-primary)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {file.fileName}
-                  </span>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", overflow: "hidden" }}>
+                    <span
+                      title={file.fileName}
+                      style={{
+                        fontWeight: 700,
+                        fontSize: "0.82rem",
+                        color: "var(--text-primary)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {file.fileName}
+                    </span>
+                  </div>
                 </div>
               </td>
 
