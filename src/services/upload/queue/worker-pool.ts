@@ -149,6 +149,9 @@ class UploadWorkerPool {
         onProgress: async (percent, uploadedBytes, speed, eta) => {
           await UploadJobQueue.updateJobProgress(job.id, percent, uploadedBytes, speed, eta);
         },
+        checkCancelled: () => {
+          return UploadJobQueue.cancelledJobs.has(job.id);
+        },
       });
 
       // 4. Send document message to Telegram channel

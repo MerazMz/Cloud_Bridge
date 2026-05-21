@@ -126,6 +126,44 @@ export async function GET(
   }
 }
 
+async function getNestedFiles(folderId: string): Promise<any[]> {
+  let results: any[] = [];
+  const children = await prisma.file.findMany({
+    where: { parentId: folderId },
+  });
+  for (const child of children) {
+    if (child.mimeType === "folder") {
+      const nested = await getNestedFiles(child.id);
+      results = [...results, ...nested];
+    } else {
+      results.push(child);
+    }
+  }
+  return results;
+}
+
+async function recursivelySoftDelete(folderId: string) {
+  await prisma.file.update({
+    where: { id: folderId },
+    data: { isDeleted: true },
+  });
+
+  const children = await prisma.file.findMany({
+    where: { parentId: folderId },
+  });
+
+  for (const child of children) {
+    if (child.mimeType === "folder") {
+      await recursivelySoftDelete(child.id);
+    } else {
+      await prisma.file.update({
+        where: { id: child.id },
+        data: { isDeleted: true },
+      });
+    }
+  }
+}
+
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ fileId: string }> }
@@ -158,11 +196,45 @@ export async function DELETE(
 
     if (permanent) {
       if (file.mimeType === "folder") {
-        // Direct database deletion for virtual folders (cascades sub-files automatically)
+        // Find all nested files to delete from Telegram first
+        const nestedFiles = await getNestedFiles(fileId);
+
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            storageChannelId: true,
+            storageChannelAccessHash: true,
+          },
+        });
+
+        if (user && user.storageChannelId && user.storageChannelAccessHash && nestedFiles.length > 0) {
+          try {
+            client = await getClientForUser(userId);
+            for (const nestedFile of nestedFiles) {
+              try {
+                await deleteFileFromTelegram(
+                  client,
+                  user.storageChannelId,
+                  user.storageChannelAccessHash,
+                  nestedFile.telegramMessageId
+                );
+              } catch (telegramError) {
+                log.warn("Telegram file deletion failed for nested file", {
+                  fileId: nestedFile.id,
+                  error: telegramError,
+                });
+              }
+            }
+          } catch (clientErr) {
+            log.error("Failed to restore Telegram client for nested files deletion", clientErr);
+          }
+        }
+
+        // Direct database deletion for virtual folders (cascades sub-files automatically in DB)
         await prisma.file.delete({
           where: { id: fileId },
         });
-        log.info("Folder and its children permanently deleted from database.", { fileId });
+        log.info("Folder and its children permanently deleted from database and Telegram.", { fileId });
         return successResponse(null, "Folder permanently deleted.");
       }
 
@@ -204,13 +276,18 @@ export async function DELETE(
       log.info("File permanently deleted from Telegram and database", { fileId });
       return successResponse(null, "File permanently deleted.");
     } else {
-      // Soft Delete: just update database isDeleted flag
-      await prisma.file.update({
-        where: { id: fileId },
-        data: { isDeleted: true },
-      });
+      if (file.mimeType === "folder") {
+        await recursivelySoftDelete(fileId);
+        log.info("Folder and its children soft deleted (moved to trash)", { fileId });
+      } else {
+        // Soft Delete: just update database isDeleted flag
+        await prisma.file.update({
+          where: { id: fileId },
+          data: { isDeleted: true },
+        });
+        log.info("File soft deleted (moved to trash)", { fileId });
+      }
 
-      log.info("File soft deleted (moved to trash)", { fileId });
       return successResponse(null, "File moved to trash successfully.");
     }
   } catch (error) {
@@ -225,6 +302,28 @@ export async function DELETE(
       } catch {
         // Ignore disconnect errors
       }
+    }
+  }
+}
+
+async function recursivelyRestore(folderId: string) {
+  await prisma.file.update({
+    where: { id: folderId },
+    data: { isDeleted: false },
+  });
+
+  const children = await prisma.file.findMany({
+    where: { parentId: folderId },
+  });
+
+  for (const child of children) {
+    if (child.mimeType === "folder") {
+      await recursivelyRestore(child.id);
+    } else {
+      await prisma.file.update({
+        where: { id: child.id },
+        data: { isDeleted: false },
+      });
     }
   }
 }
@@ -255,10 +354,18 @@ export async function PATCH(
     const body = await request.json();
     const isDeleted = typeof body.isDeleted === "boolean" ? body.isDeleted : false;
 
-    const updatedFile = await prisma.file.update({
-      where: { id: fileId },
-      data: { isDeleted },
-    });
+    let updatedFile;
+    if (!isDeleted && file.mimeType === "folder") {
+      await recursivelyRestore(fileId);
+      updatedFile = await prisma.file.findUnique({
+        where: { id: fileId },
+      });
+    } else {
+      updatedFile = await prisma.file.update({
+        where: { id: fileId },
+        data: { isDeleted },
+      });
+    }
 
     log.info("File status updated", { fileId, isDeleted });
     return successResponse(updatedFile, "File updated successfully.");

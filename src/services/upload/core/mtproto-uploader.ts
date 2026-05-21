@@ -18,6 +18,7 @@ export interface UploadOptions {
   fileSize: number;
   workers?: number;
   onProgress?: (percent: number, uploadedBytes: number, speed: string, eta: string) => void;
+  checkCancelled?: () => boolean;
 }
 
 /**
@@ -89,6 +90,9 @@ export async function uploadToTelegramStream(options: UploadOptions): Promise<an
             try {
               while (true) {
                 if (hasFailed) return;
+                if (checkCancelled && checkCancelled()) {
+                  throw new Error("Upload cancelled");
+                }
                 let sender;
                 try {
                   // Round-robin alternate among the available Telegram client TCP connections in the pool

@@ -16,6 +16,8 @@ import { RecentActivityTimeline } from "@/components/dashboard/recent-activity-t
 import { RecentFilesTable } from "@/components/dashboard/recent-files-table";
 import { CommandPalette } from "@/components/dashboard/command-palette";
 import { VideoThumbnail } from "@/components/dashboard/video-thumbnail";
+import { DirectorySelectorModal } from "@/components/dashboard/directory-selector-modal";
+import { ConfirmationModal } from "@/components/dashboard/confirmation-modal";
 
 export interface DBFile {
   id: string;
@@ -60,6 +62,43 @@ function DashboardContent() {
   const [darkMode, setDarkMode] = useState(false);
   const [deletingIds, setDeletingIds] = useState<Record<string, boolean>>({});
   const [downloadingIds, setDownloadingIds] = useState<Record<string, boolean>>({});
+  const [allFiles, setAllFiles] = useState<DBFile[]>([]);
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    type?: "danger" | "warning" | "info";
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    onConfirm: () => {},
+  });
+
+  const showConfirm = (options: {
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    type?: "danger" | "warning" | "info";
+    onConfirm: () => void;
+  }) => {
+    setConfirmModal({
+      isOpen: true,
+      title: options.title,
+      message: options.message,
+      confirmText: options.confirmText,
+      cancelText: options.cancelText,
+      type: options.type,
+      onConfirm: () => {
+        options.onConfirm();
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+      },
+    });
+  };
 
   // Folder Directory Navigation States
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -95,8 +134,11 @@ function DashboardContent() {
 
   // Upload Queue State
   const [uploadQueue, setUploadQueue] = useState<QueueItem[]>([]);
+  const [isChooseDirModalOpen, setIsChooseDirModalOpen] = useState(false);
+  const [uploadTargetFolderId, setUploadTargetFolderId] = useState<string | null>(null);
 
-  const addFilesToQueue = (fileList: FileList | File[]) => {
+  const addFilesToQueue = (fileList: FileList | File[], targetParentId?: string | null) => {
+    const parentId = targetParentId !== undefined ? targetParentId : currentFolderId;
     const newItems: QueueItem[] = Array.from(fileList).map((file) => ({
       id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       file,
@@ -104,7 +146,7 @@ function DashboardContent() {
       status: "pending",
       speed: "0 KB/s",
       uploadedBytes: 0,
-      parentId: currentFolderId,
+      parentId: parentId,
     }));
     setUploadQueue((prev) => [...prev, ...newItems]);
   };
@@ -197,6 +239,18 @@ function DashboardContent() {
     }
   };
 
+  const fetchAllFiles = async () => {
+    try {
+      const res = await fetch("/api/files");
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setAllFiles(json.data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch all files for global analytics", err);
+    }
+  };
+
   const fetchFiles = async (folderId: string | null = currentFolderId) => {
     setFilesLoading(true);
     try {
@@ -235,6 +289,7 @@ function DashboardContent() {
         setNewFolderName("");
         setIsNewFolderModalOpen(false);
         fetchFiles(currentFolderId);
+        fetchAllFiles();
       } else {
         showToast("error", json.message || "Failed to create folder.");
       }
@@ -268,6 +323,12 @@ function DashboardContent() {
       fetchFiles(currentFolderId);
     }
   }, [user, currentFolderId]);
+
+  useEffect(() => {
+    if (user && user.storageChannelId) {
+      fetchAllFiles();
+    }
+  }, [user]);
 
   // Sequential Upload Queue Runner Effect Hook
   useEffect(() => {
@@ -404,6 +465,7 @@ function DashboardContent() {
                 
                 // Fetch the updated files list scoped to current folder
                 fetchFiles(currentFolderId);
+                fetchAllFiles();
 
                 // Complete queue item
                 setUploadQueue((prev) =>
@@ -625,7 +687,7 @@ function DashboardContent() {
   };
 
   // Move file to Trash (Soft Delete on backend)
-  const handleMoveToTrash = async (file: DBFile) => {
+  const executeMoveToTrash = async (file: DBFile) => {
     try {
       const res = await fetch(`/api/files/${file.id}`, {
         method: "DELETE",
@@ -636,11 +698,34 @@ function DashboardContent() {
         setFiles((prev) =>
           prev.map((f) => (f.id === file.id ? { ...f, isDeleted: true } : f))
         );
+        fetchAllFiles();
       } else {
         showToast("error", json.message || "Failed to move file to trash.");
       }
     } catch {
       showToast("error", "An error occurred while moving the file to trash.");
+    }
+  };
+
+  const handleMoveToTrash = (file: DBFile) => {
+    if (file.mimeType === "folder") {
+      showConfirm({
+        title: "Move Folder to Trash?",
+        message: `Warning: Deleting this folder will move all the contents inside it to Trash. Do you want to proceed?`,
+        confirmText: "Move to Trash",
+        cancelText: "Cancel",
+        type: "warning",
+        onConfirm: () => executeMoveToTrash(file),
+      });
+    } else {
+      showConfirm({
+        title: "Move File to Trash?",
+        message: `Are you sure you want to move "${file.fileName}" to trash?`,
+        confirmText: "Move to Trash",
+        cancelText: "Cancel",
+        type: "warning",
+        onConfirm: () => executeMoveToTrash(file),
+      });
     }
   };
 
@@ -658,6 +743,7 @@ function DashboardContent() {
         setFiles((prev) =>
           prev.map((f) => (f.id === file.id ? { ...f, isDeleted: false } : f))
         );
+        fetchAllFiles();
       } else {
         showToast("error", json.message || "Failed to restore file.");
       }
@@ -667,7 +753,7 @@ function DashboardContent() {
   };
 
   // Permanent Delete from Telegram & DB
-  const handlePermanentDelete = async (fileId: string, fileName: string) => {
+  const executePermanentDelete = async (fileId: string, fileName: string) => {
     setDeletingIds((prev) => ({ ...prev, [fileId]: true }));
     try {
       const res = await fetch(`/api/files/${fileId}?permanent=true`, {
@@ -678,6 +764,7 @@ function DashboardContent() {
       if (json.success) {
         showToast("success", `${fileName} permanently deleted.`);
         setFiles((prev) => prev.filter((f) => f.id !== fileId));
+        fetchAllFiles();
       } else {
         showToast("error", json.message || "Failed to delete file.");
       }
@@ -686,6 +773,21 @@ function DashboardContent() {
     } finally {
       setDeletingIds((prev) => ({ ...prev, [fileId]: false }));
     }
+  };
+
+  const handlePermanentDelete = (fileId: string, fileName: string) => {
+    const file = files.find((f) => f.id === fileId);
+    const isFolder = file && file.mimeType === "folder";
+    showConfirm({
+      title: isFolder ? "Permanently Delete Folder?" : "Permanently Delete File?",
+      message: isFolder
+        ? `Warning: Permanently deleting this folder will permanently delete all the contents inside it. This action cannot be undone. Do you want to proceed?`
+        : `Are you sure you want to permanently delete "${fileName}"? This action cannot be undone.`,
+      confirmText: "Permanently Delete",
+      cancelText: "Cancel",
+      type: "danger",
+      onConfirm: () => executePermanentDelete(fileId, fileName),
+    });
   };
 
   const handleShare = async (fileId: string) => {
@@ -744,13 +846,21 @@ function DashboardContent() {
 
   const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      addFilesToQueue(e.target.files);
+      addFilesToQueue(e.target.files, uploadTargetFolderId);
       router.push("/dashboard?tab=uploads");
     }
   };
 
   const triggerFileInput = () => {
-    fileInputRef.current?.click();
+    setIsChooseDirModalOpen(true);
+  };
+
+  const handleDirectorySelected = (folderId: string | null) => {
+    setUploadTargetFolderId(folderId);
+    setIsChooseDirModalOpen(false);
+    setTimeout(() => {
+      fileInputRef.current?.click();
+    }, 150);
   };
 
   // Helper formats
@@ -943,15 +1053,16 @@ function DashboardContent() {
 
   // Active files (excludes files marked as isDeleted)
   const activeFiles = files.filter((f) => !f.isDeleted);
+  const globalActiveFiles = allFiles.filter((f) => !f.isDeleted);
 
   // Metrics calculation
-  const totalStorage = activeFiles.reduce((acc, f) => acc + Number(f.fileSize), 0);
-  const totalFilesCount = activeFiles.length;
-  const imageFiles = activeFiles.filter(f => classifyFile(f.mimeType, f.fileName) === "image");
-  const documentFiles = activeFiles.filter(f => classifyFile(f.mimeType, f.fileName) === "document");
-  const mediaFiles = activeFiles.filter(f => classifyFile(f.mimeType, f.fileName) === "media");
-  const archiveFiles = activeFiles.filter(f => classifyFile(f.mimeType, f.fileName) === "archive");
-  const otherFiles = activeFiles.filter(
+  const totalStorage = globalActiveFiles.reduce((acc, f) => acc + Number(f.fileSize), 0);
+  const totalFilesCount = globalActiveFiles.length;
+  const imageFiles = globalActiveFiles.filter(f => classifyFile(f.mimeType, f.fileName) === "image");
+  const documentFiles = globalActiveFiles.filter(f => classifyFile(f.mimeType, f.fileName) === "document");
+  const mediaFiles = globalActiveFiles.filter(f => classifyFile(f.mimeType, f.fileName) === "media");
+  const archiveFiles = globalActiveFiles.filter(f => classifyFile(f.mimeType, f.fileName) === "archive");
+  const otherFiles = globalActiveFiles.filter(
     (f) =>
       classifyFile(f.mimeType, f.fileName) !== "image" &&
       classifyFile(f.mimeType, f.fileName) !== "document" &&
@@ -1137,6 +1248,7 @@ function DashboardContent() {
         showBanner={showBanner}
         isBannerVisible={isBannerVisible}
         handleCloseBanner={handleCloseBanner}
+        onCreateFolderClick={() => setIsNewFolderModalOpen(true)}
       />
 
       {/* Conditional Rendering Based on Tabs */}
@@ -1882,76 +1994,30 @@ function DashboardContent() {
                         </span>
                       </div>
 
-                      {/* Actions Ellipsis button */}
-                      <div
-                        style={{ position: "relative" }}
+                      {/* Direct Delete button */}
+                      <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          setActiveMenuFileId(activeMenuFileId === folder.id ? null : folder.id);
+                          handleMoveToTrash(folder);
                         }}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "#EF4444",
+                          cursor: "pointer",
+                          padding: "0.25rem",
+                          borderRadius: "4px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                        className="dropdown-item-hover"
+                        title="Delete Folder"
                       >
-                        <button
-                          style={{
-                            background: "none",
-                            border: "none",
-                            color: "var(--text-muted)",
-                            cursor: "pointer",
-                            padding: "0.25rem",
-                            borderRadius: "4px",
-                          }}
-                          className="dropdown-item-hover"
-                        >
-                          <svg style={{ width: "0.9rem", height: "0.9rem" }} fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M12 10.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm0-6a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm0 12a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z" />
-                          </svg>
-                        </button>
-
-                        {activeMenuFileId === folder.id && (
-                          <div
-                            style={{
-                              position: "absolute",
-                              right: 0,
-                              top: "100%",
-                              background: "#1e293b",
-                              border: "1px solid var(--border-default)",
-                              borderRadius: "8px",
-                              padding: "0.35rem",
-                              zIndex: 40,
-                              boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.3)",
-                              minWidth: "110px",
-                            }}
-                          >
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handlePermanentDelete(folder.id, folder.fileName);
-                                setActiveMenuFileId(null);
-                              }}
-                              style={{
-                                width: "100%",
-                                textAlign: "left",
-                                background: "none",
-                                border: "none",
-                                color: "#EF4444",
-                                fontSize: "0.74rem",
-                                fontWeight: 700,
-                                padding: "0.4rem 0.6rem",
-                                borderRadius: "6px",
-                                cursor: "pointer",
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "0.35rem",
-                              }}
-                              className="dropdown-item-hover"
-                            >
-                              <svg style={{ width: "0.8rem", height: "0.8rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                              </svg>
-                              Delete
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                        <svg style={{ width: "0.95rem", height: "0.95rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                        </svg>
+                      </button>
                     </div>
                   ))}
               </div>
@@ -2452,6 +2518,28 @@ function DashboardContent() {
           </div>
         </div>
       )}
+
+      {/* Directory Selector Modal for Upload */}
+      <DirectorySelectorModal
+        isOpen={isChooseDirModalOpen}
+        onClose={() => setIsChooseDirModalOpen(false)}
+        onSelect={handleDirectorySelected}
+        darkMode={darkMode}
+        showToast={showToast}
+      />
+
+      {/* Reusable Custom Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        onConfirm={confirmModal.onConfirm}
+        onCancel={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+        confirmText={confirmModal.confirmText}
+        cancelText={confirmModal.cancelText}
+        darkMode={darkMode}
+        type={confirmModal.type}
+      />
 
       {/* Premium File Details Modal */}
       {selectedDetailsFile && (

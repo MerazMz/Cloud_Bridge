@@ -14,6 +14,8 @@ export interface CreateJobParams {
 }
 
 export class UploadJobQueue {
+  static cancelledJobs = new Set<string>();
+
   /**
    * Register a new upload job in the queue database.
    */
@@ -68,6 +70,8 @@ export class UploadJobQueue {
    * Transition job to successfully completed. Removes the temporary disk file.
    */
   static async completeJob(jobId: string) {
+    this.cancelledJobs.delete(jobId);
+
     const job = await prisma.uploadJob.update({
       where: { id: jobId },
       data: {
@@ -103,6 +107,33 @@ export class UploadJobQueue {
     });
 
     if (!job) return;
+
+    this.cancelledJobs.delete(jobId);
+
+    // If already cancelled or requested cancel, make sure it stays cancelled
+    if (job.status === "cancelled" || error.message === "Upload cancelled") {
+      const updatedJob = await prisma.uploadJob.update({
+        where: { id: jobId },
+        data: {
+          status: "cancelled",
+          errorMessage: error.message || "Upload cancelled",
+        },
+      });
+      await this.cleanupTempFile(job.tempFilePath);
+
+      progressBroadcaster.broadcast(jobId, {
+        jobId,
+        status: "cancelled",
+        percent: job.progress,
+        uploadedBytes: Number(job.uploadedBytes),
+        totalBytes: Number(job.fileSize),
+        speed: "0 KB/s",
+        eta: "--",
+        errorMessage: error.message,
+      });
+
+      return updatedJob;
+    }
 
     const nextRetry = job.retries + 1;
     const isFinalFailure = nextRetry >= job.maxRetries;
@@ -145,6 +176,8 @@ export class UploadJobQueue {
    * Cancel an active upload job, cleaning up temp disk footprint.
    */
   static async cancelJob(jobId: string) {
+    this.cancelledJobs.add(jobId);
+
     const job = await prisma.uploadJob.findUnique({
       where: { id: jobId },
     });
