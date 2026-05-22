@@ -390,12 +390,12 @@ export default function LoginPage() {
         </div>
 
         {/* Bottom section: Phone Number Input form in centered card row */}
-        <div className="form-centered-row">
+        <div className="form-centered-row ">
           <PhoneForm />
         </div>
 
         {/* Footer inside the card at bottom */}
-        <footer
+        {/* <footer
           style={{
             width: "100%",
             textAlign: "center",
@@ -408,7 +408,7 @@ export default function LoginPage() {
           }}
         >
           <span>© 2025 CloudBridge. All rights reserved.</span>
-        </footer>
+        </footer> */}
       </div>
     </div>
   );

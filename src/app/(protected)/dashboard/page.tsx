@@ -16,6 +16,7 @@ import { RecentActivityTimeline } from "@/components/dashboard/recent-activity-t
 import { RecentFilesTable } from "@/components/dashboard/recent-files-table";
 import { CommandPalette } from "@/components/dashboard/command-palette";
 import { VideoThumbnail } from "@/components/dashboard/video-thumbnail";
+import { DocumentViewer } from "@/components/dashboard/document-viewer";
 
 export interface DBFile {
   id: string;
@@ -23,6 +24,7 @@ export interface DBFile {
   fileSize: number;
   mimeType: string;
   isDeleted?: boolean;
+  isShared?: boolean;
   createdAt: string;
 }
 
@@ -96,6 +98,10 @@ function DashboardContent() {
 
   // Lightweight Image Viewer Modal States
   const [activeImageViewerFileId, setActiveImageViewerFileId] = useState<string | null>(null);
+  const [activeDocumentViewerFileId, setActiveDocumentViewerFileId] = useState<string | null>(null);
+  const [renameModalFile, setRenameModalFile] = useState<DBFile | null>(null);
+  const [renameModalValue, setRenameModalValue] = useState("");
+  const [renameModalLoading, setRenameModalLoading] = useState(false);
   const [imageZoom, setImageZoom] = useState<number>(1);
   const [imageRotation, setImageRotation] = useState<number>(0);
   const [imageFlipH, setImageFlipH] = useState<boolean>(false);
@@ -194,7 +200,7 @@ function DashboardContent() {
       } else if (tab === "favorites") {
         visibleFiles = activeFiles.filter((f) => favorites.includes(f.id));
       } else if (tab === "shared") {
-        visibleFiles = activeFiles.filter((f) => sharedIds.includes(f.id));
+        visibleFiles = activeFiles.filter((f) => f.isShared);
       } else if (tab === "trash") {
         visibleFiles = files.filter((f) => f.isDeleted);
       } else if (tab === "folders") {
@@ -285,6 +291,24 @@ function DashboardContent() {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [activeImageViewerFileId, files, tab, favorites, sharedIds, selectedFolderCategory, searchTerm, videoRef]);
+
+  // Touchpad pinch-to-zoom for the image viewer
+  useEffect(() => {
+    if (!activeImageViewerFileId) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 0.08 : -0.08;
+        setImageZoom((z) => Math.max(0.25, Math.min(z + factor, 5)));
+      }
+    };
+
+    window.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      window.removeEventListener("wheel", handleWheel);
+    };
+  }, [activeImageViewerFileId]);
 
   // Click-outside listener for dropdown menus
   useEffect(() => {
@@ -965,19 +989,90 @@ function DashboardContent() {
 
   const handleShare = async (fileId: string) => {
     try {
+      const response = await fetch(`/api/files/${fileId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isShared: true }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to configure sharing on server.");
+      }
+
+      setFiles((prev) =>
+        prev.map((f) => (f.id === fileId ? { ...f, isShared: true } : f))
+      );
+
       const sharedUrl = `${window.location.origin}/api/files/shared/${fileId}`;
       await navigator.clipboard.writeText(sharedUrl);
-
-      // Save to shared list
-      if (!sharedIds.includes(fileId)) {
-        const nextShared = [...sharedIds, fileId];
-        setSharedIds(nextShared);
-        localStorage.setItem("shared_ids", JSON.stringify(nextShared));
-      }
 
       showToast("success", "Shareable download link copied to clipboard!");
     } catch (err) {
       showToast("error", "Failed to copy share link.");
+    }
+  };
+
+  const handleRevokeShare = async (fileId: string) => {
+    try {
+      const response = await fetch(`/api/files/${fileId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isShared: false }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to revoke access on server.");
+      }
+
+      setFiles((prev) =>
+        prev.map((f) => (f.id === fileId ? { ...f, isShared: false } : f))
+      );
+
+      showToast("success", "Access to this shared link has been revoked!");
+    } catch (err) {
+      showToast("error", "Failed to revoke access.");
+    }
+  };
+  const handleRenameFile = async (fileId: string, newName: string) => {
+    try {
+      const response = await fetch(`/api/files/${fileId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName: newName }),
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.message || "Failed to rename file.");
+      }
+
+      setFiles((prevFiles) =>
+        prevFiles.map((f) => (f.id === fileId ? { ...f, fileName: newName } : f))
+      );
+      showToast("success", "File renamed successfully.");
+      fetchFiles(currentFolderId);
+    } catch (err: any) {
+      showToast("error", err.message || "Failed to rename file.");
+      throw err;
+    }
+  };
+
+  const handleRenameModalSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!renameModalFile) return;
+    const trimmed = renameModalValue.trim();
+    if (!trimmed || trimmed === renameModalFile.fileName) {
+      setRenameModalFile(null);
+      return;
+    }
+    setRenameModalLoading(true);
+    try {
+      await handleRenameFile(renameModalFile.id, trimmed);
+      setRenameModalFile(null);
+    } catch {
+      // Toast is managed inside handleRenameFile
+    } finally {
+      setRenameModalLoading(false);
     }
   };
 
@@ -1332,7 +1427,7 @@ function DashboardContent() {
   } else if (tab === "favorites") {
     visibleFiles = activeFiles.filter((f) => favorites.includes(f.id));
   } else if (tab === "shared") {
-    visibleFiles = activeFiles.filter((f) => sharedIds.includes(f.id));
+    visibleFiles = activeFiles.filter((f) => f.isShared);
   } else if (tab === "trash") {
     visibleFiles = files.filter((f) => f.isDeleted);
   } else if (tab === "folders") {
@@ -1360,8 +1455,51 @@ function DashboardContent() {
     );
   };
 
+  // Helper to determine if file is a viewer-supported document
+  const isDocumentFile = (file: DBFile) => {
+    const mimeLower = (file.mimeType || "").toLowerCase();
+    const nameLower = (file.fileName || "").toLowerCase();
+    const ext = nameLower.split(".").pop()?.toLowerCase();
+    
+    // PDF
+    if (ext === "pdf" || mimeLower === "application/pdf") return true;
+    
+    // Text / Code
+    const textExtensions = [
+      "txt", "md", "json", "csv", "xml", "yaml", "yml", "ini", "log", "conf",
+      "js", "jsx", "ts", "tsx", "py", "html", "css", "go", "sh", "bat", "sql",
+      "cpp", "h", "java", "rs", "php", "rb", "swift", "kt", "scala"
+    ];
+    if (textExtensions.includes(ext || "") || mimeLower.startsWith("text/")) return true;
+    
+    // Office / Binary documents that we show fallbacks for
+    const docExtensions = [
+      "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp",
+      "zip", "tar", "rar", "7z", "gz"
+    ];
+    return docExtensions.includes(ext || "");
+  };
+
   // List of all image files in current view mode
   const activeImages = ((tab === "dashboard" || tab === "my-files") ? finalFilteredFiles.filter((f) => f.mimeType !== "folder") : finalFilteredFiles).filter(isImageFile);
+
+  // List of all document files in current view mode (includes images, videos, audio, PDFs, and docs for unified slideshow navigation)
+  const activeDocuments = ((tab === "dashboard" || tab === "my-files") ? finalFilteredFiles.filter((f) => f.mimeType !== "folder") : finalFilteredFiles).filter((f) => f.mimeType !== "folder");
+
+  const currentViewerDocIndex = activeDocuments.findIndex((doc) => doc.id === activeDocumentViewerFileId);
+  const currentViewerDoc = activeDocuments.find((doc) => doc.id === activeDocumentViewerFileId);
+
+  const handleNextViewerDoc = () => {
+    if (currentViewerDocIndex !== -1 && currentViewerDocIndex < activeDocuments.length - 1) {
+      setActiveDocumentViewerFileId(activeDocuments[currentViewerDocIndex + 1].id);
+    }
+  };
+
+  const handlePrevViewerDoc = () => {
+    if (currentViewerDocIndex !== -1 && currentViewerDocIndex > 0) {
+      setActiveDocumentViewerFileId(activeDocuments[currentViewerDocIndex - 1].id);
+    }
+  };
 
   const currentViewerIndex = activeImages.findIndex((img) => img.id === activeImageViewerFileId);
   const currentViewerImage = activeImages.find((img) => img.id === activeImageViewerFileId);
@@ -2541,6 +2679,37 @@ function DashboardContent() {
                           >
                             <button
                               onClick={(e) => {
+                                e.stopPropagation();
+                                setRenameModalFile(folder as any);
+                                setRenameModalValue(folder.fileName);
+                                setActiveMenuFileId(null);
+                              }}
+                              style={{
+                                width: "100%",
+                                textAlign: "left",
+                                background: "none",
+                                border: "none",
+                                color: darkMode ? "#ffffff" : "#0f172a",
+                                fontSize: "0.74rem",
+                                fontWeight: 700,
+                                padding: "0.4rem 0.6rem",
+                                borderRadius: "6px",
+                                cursor: "pointer",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "0.35rem",
+                                marginBottom: "0.25rem",
+                              }}
+                              className="dropdown-item-hover"
+                            >
+                              <svg style={{ width: "0.8rem", height: "0.8rem", color: darkMode ? "#cbd5e1" : "#475569" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z" />
+                              </svg>
+                              Rename
+                            </button>
+                            <button
+                              onClick={(e) => {
                                   e.stopPropagation();
                                   handlePermanentDelete(folder.id, folder.fileName);
                                   setActiveMenuFileId(null);
@@ -2632,15 +2801,7 @@ function DashboardContent() {
                           onMouseEnter={() => setHoveredFileId(file.id)}
                           onMouseLeave={() => setHoveredFileId(null)}
                           onClick={() => {
-                            if (isImage || isVideo) {
-                              setActiveImageViewerFileId(file.id);
-                              setImageZoom(1);
-                              setImageRotation(0);
-                              setImageFlipH(false);
-                              setImageFlipV(false);
-                            } else {
-                              setSelectedDetailsFile(file);
-                            }
+                            setActiveDocumentViewerFileId(file.id);
                           }}
                         >
                           {/* Image/Video Preview or Icon slot */}
@@ -2799,35 +2960,67 @@ function DashboardContent() {
                                 </svg>
                                 <span>Details</span>
                               </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleShare(file.id);
-                                  setActiveMenuFileId(null);
-                                }}
-                                style={{
-                                  width: "100%",
-                                  textAlign: "left",
-                                  background: "none",
-                                  border: "none",
-                                  color: darkMode ? "#ffffff" : "#0f172a",
-                                  fontSize: "0.74rem",
-                                  fontWeight: 700,
-                                  padding: "0.4rem 0.6rem",
-                                  borderRadius: "6px",
-                                  cursor: "pointer",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "0.5rem",
-                                }}
-                                className="dropdown-item-hover"
-                              >
-                                <svg style={{ width: "0.95rem", height: "0.95rem", color: darkMode ? "#cbd5e1" : "#475569" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-                                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-                                </svg>
-                                <span>Share</span>
-                              </button>
+                              {file.isShared ? (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRevokeShare(file.id);
+                                    setActiveMenuFileId(null);
+                                  }}
+                                  style={{
+                                    width: "100%",
+                                    textAlign: "left",
+                                    background: "none",
+                                    border: "none",
+                                    color: "#ef4444",
+                                    fontSize: "0.74rem",
+                                    fontWeight: 700,
+                                    padding: "0.4rem 0.6rem",
+                                    borderRadius: "6px",
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "0.5rem",
+                                  }}
+                                  className="dropdown-item-hover"
+                                >
+                                  <svg style={{ width: "0.95rem", height: "0.95rem", color: "#ef4444" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                                  </svg>
+                                  <span>Revoke Access</span>
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleShare(file.id);
+                                    setActiveMenuFileId(null);
+                                  }}
+                                  style={{
+                                    width: "100%",
+                                    textAlign: "left",
+                                    background: "none",
+                                    border: "none",
+                                    color: darkMode ? "#ffffff" : "#0f172a",
+                                    fontSize: "0.74rem",
+                                    fontWeight: 700,
+                                    padding: "0.4rem 0.6rem",
+                                    borderRadius: "6px",
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "0.5rem",
+                                  }}
+                                  className="dropdown-item-hover"
+                                >
+                                  <svg style={{ width: "0.95rem", height: "0.95rem", color: darkMode ? "#cbd5e1" : "#475569" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                                  </svg>
+                                  <span>Share Link</span>
+                                </button>
+                              )}
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -2855,6 +3048,36 @@ function DashboardContent() {
                                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 3v12"/>
                                 </svg>
                                 <span>Download</span>
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setRenameModalFile(file);
+                                  setRenameModalValue(file.fileName);
+                                  setActiveMenuFileId(null);
+                                }}
+                                style={{
+                                  width: "100%",
+                                  textAlign: "left",
+                                  background: "none",
+                                  border: "none",
+                                  color: darkMode ? "#ffffff" : "#0f172a",
+                                  fontSize: "0.74rem",
+                                  fontWeight: 700,
+                                  padding: "0.4rem 0.6rem",
+                                  borderRadius: "6px",
+                                  cursor: "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "0.5rem",
+                                }}
+                                className="dropdown-item-hover"
+                              >
+                                <svg style={{ width: "0.95rem", height: "0.95rem", color: darkMode ? "#cbd5e1" : "#475569" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                  <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z" />
+                                </svg>
+                                <span>Rename</span>
                               </button>
                               <button
                                 onClick={(e) => {
@@ -2932,6 +3155,7 @@ function DashboardContent() {
                     favorites={favorites}
                     handleToggleFavorite={handleToggleFavorite}
                     handleShare={handleShare}
+                    handleRevokeShare={handleRevokeShare}
                     handleDownload={handleDownload}
                     handleMoveToTrash={handleMoveToTrash}
                     getFileStyle={getFileStyle}
@@ -2942,16 +3166,12 @@ function DashboardContent() {
                     activeMenuFileId={activeMenuFileId}
                     setActiveMenuFileId={setActiveMenuFileId}
                     darkMode={darkMode}
+                    onRenameClick={(file) => {
+                      setRenameModalFile(file);
+                      setRenameModalValue(file.fileName);
+                    }}
                     onFileClick={(file) => {
-                      if (isImageFile(file)) {
-                        setActiveImageViewerFileId(file.id);
-                        setImageZoom(1);
-                        setImageRotation(0);
-                        setImageFlipH(false);
-                        setImageFlipV(false);
-                      } else {
-                        setSelectedDetailsFile(file);
-                      }
+                      setActiveDocumentViewerFileId(file.id);
                     }}
                   />
                 )}
@@ -3614,6 +3834,130 @@ function DashboardContent() {
         files={files}
         darkMode={darkMode}
       />
+
+      {/* Premium Document Viewer modal */}
+      <DocumentViewer
+        file={files.find((f) => f.id === activeDocumentViewerFileId) || null}
+        isOpen={activeDocumentViewerFileId !== null}
+        onClose={() => setActiveDocumentViewerFileId(null)}
+        darkMode={darkMode}
+        handleDownload={handleDownload}
+        handleShare={handleShare}
+        hasPrev={currentViewerDocIndex > 0}
+        hasNext={currentViewerDocIndex !== -1 && currentViewerDocIndex < activeDocuments.length - 1}
+        onPrev={handlePrevViewerDoc}
+        onNext={handleNextViewerDoc}
+        handleRename={handleRenameFile}
+      />
+
+      {/* Premium Rename File/Folder Dialog Modal */}
+      {renameModalFile && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background: "rgba(8, 10, 18, 0.75)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 20000,
+            animation: "fadeIn 0.2s ease-out",
+          }}
+          onClick={() => setRenameModalFile(null)}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: "420px",
+              background: darkMode ? "#111827" : "#ffffff",
+              border: darkMode ? "1px solid rgba(255, 255, 255, 0.08)" : "1px solid rgba(0, 0, 0, 0.08)",
+              borderRadius: "16px",
+              padding: "1.5rem",
+              boxShadow: "0 20px 40px rgba(0,0,0,0.3)",
+              fontFamily: "var(--font-outfit), sans-serif",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 800, color: darkMode ? "#ffffff" : "#0f172a", margin: "0 0 0.5rem 0" }}>
+              Rename {renameModalFile.mimeType === "folder" ? "Folder" : "File"}
+            </h3>
+            <p style={{ fontSize: "0.78rem", color: darkMode ? "#94a3b8" : "#64748b", margin: "0 0 1rem 0", lineHeight: 1.4 }}>
+              Enter a new name for your {renameModalFile.mimeType === "folder" ? "folder" : "file"}.
+            </p>
+            <form onSubmit={handleRenameModalSubmit}>
+              <input
+                type="text"
+                value={renameModalValue}
+                onChange={(e) => setRenameModalValue(e.target.value)}
+                autoFocus
+                disabled={renameModalLoading}
+                style={{
+                  width: "100%",
+                  background: darkMode ? "rgba(15, 23, 42, 0.6)" : "rgba(0, 0, 0, 0.03)",
+                  border: "1px solid rgba(245, 158, 11, 0.5)",
+                  borderRadius: "10px",
+                  padding: "0.6rem 0.8rem",
+                  fontSize: "0.85rem",
+                  fontWeight: 700,
+                  color: darkMode ? "#ffffff" : "#0f172a",
+                  outline: "none",
+                  marginBottom: "1.25rem",
+                }}
+              />
+              <div style={{ display: "flex", gap: "0.75rem", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  onClick={() => setRenameModalFile(null)}
+                  disabled={renameModalLoading}
+                  style={{
+                    background: "transparent",
+                    border: darkMode ? "1px solid rgba(255,255,255,0.15)" : "1px solid rgba(0,0,0,0.15)",
+                    borderRadius: "8px",
+                    padding: "0.5rem 1rem",
+                    fontSize: "0.8rem",
+                    fontWeight: 700,
+                    color: darkMode ? "#e2e8f0" : "#475569",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={renameModalLoading}
+                  style={{
+                    background: "linear-gradient(135deg, #F59E0B, #D97706)",
+                    border: "none",
+                    borderRadius: "8px",
+                    padding: "0.5rem 1.25rem",
+                    fontSize: "0.8rem",
+                    fontWeight: 700,
+                    color: "#ffffff",
+                    cursor: "pointer",
+                    boxShadow: "0 4px 15px rgba(217, 119, 6, 0.3)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.35rem",
+                  }}
+                >
+                  {renameModalLoading ? (
+                    <>
+                      <LoadingSpinner size="sm" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Save Changes"
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -74,7 +74,8 @@ export async function proxy(request: NextRequest) {
     if (authenticated) {
       return NextResponse.redirect(new URL("/dashboard", request.url));
     }
-    return NextResponse.redirect(new URL("/login", request.url));
+    // Allow public users to view the landing page at root (/)
+    return NextResponse.next();
   }
 
   return NextResponse.next();

@@ -12,6 +12,7 @@ interface RecentFilesTableProps {
   favorites: string[];
   handleToggleFavorite: (id: string) => void;
   handleShare: (id: string) => void;
+  handleRevokeShare: (id: string) => void;
   handleDownload: (id: string, name: string) => void;
   handleMoveToTrash: (file: DBFile) => void;
   getFileStyle: (mime: string, name: string) => { bg: string; color: string };
@@ -23,6 +24,7 @@ interface RecentFilesTableProps {
   setActiveMenuFileId: (id: string | null) => void;
   darkMode?: boolean;
   onFileClick?: (file: DBFile) => void;
+  onRenameClick?: (file: DBFile) => void;
 }
 
 export function RecentFilesTable({
@@ -33,6 +35,7 @@ export function RecentFilesTable({
   favorites,
   handleToggleFavorite,
   handleShare,
+  handleRevokeShare,
   handleDownload,
   handleMoveToTrash,
   getFileStyle,
@@ -44,6 +47,7 @@ export function RecentFilesTable({
   setActiveMenuFileId,
   darkMode = false,
   onFileClick,
+  onRenameClick,
 }: RecentFilesTableProps) {
   if (filesLoading && fileList.length === 0) {
     return (
@@ -276,34 +280,64 @@ export function RecentFilesTable({
                       }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {/* Copy Link Action */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveMenuFileId(null);
-                          handleShare(file.id);
-                        }}
-                        className="dropdown-item-hover"
-                        style={{
-                          background: "none",
-                          border: "none",
-                          borderRadius: "6px",
-                          padding: "0.45rem 0.65rem",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "0.6rem",
-                          cursor: "pointer",
-                          width: "100%",
-                          textAlign: "left",
-                          transition: "all 0.15s ease",
-                        }}
-                      >
-                        <svg style={{ width: "0.95rem", height: "0.95rem", color: darkMode ? "#cbd5e1" : "#475569" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-                          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-                        </svg>
-                        <span style={{ fontSize: "0.78rem", fontWeight: 600, color: darkMode ? "#ffffff" : "#0f172a" }}>Copy Link</span>
-                      </button>
+                      {/* Copy Link / Revoke Access Action */}
+                      {file.isShared ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuFileId(null);
+                            handleRevokeShare(file.id);
+                          }}
+                          className="dropdown-item-hover"
+                          style={{
+                            background: "none",
+                            border: "none",
+                            borderRadius: "6px",
+                            padding: "0.45rem 0.65rem",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.6rem",
+                            cursor: "pointer",
+                            width: "100%",
+                            textAlign: "left",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          <svg style={{ width: "0.95rem", height: "0.95rem", color: "#ef4444" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                          </svg>
+                          <span style={{ fontSize: "0.78rem", fontWeight: 600, color: "#ef4444" }}>Revoke Access</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuFileId(null);
+                            handleShare(file.id);
+                          }}
+                          className="dropdown-item-hover"
+                          style={{
+                            background: "none",
+                            border: "none",
+                            borderRadius: "6px",
+                            padding: "0.45rem 0.65rem",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.6rem",
+                            cursor: "pointer",
+                            width: "100%",
+                            textAlign: "left",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          <svg style={{ width: "0.95rem", height: "0.95rem", color: darkMode ? "#cbd5e1" : "#475569" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                          </svg>
+                          <span style={{ fontSize: "0.78rem", fontWeight: 600, color: darkMode ? "#ffffff" : "#0f172a" }}>Copy Link</span>
+                        </button>
+                      )}
 
                       {/* Download Action */}
                       <button
@@ -339,6 +373,37 @@ export function RecentFilesTable({
                           {isDownloading ? "Downloading..." : "Download"}
                         </span>
                       </button>
+
+                      {/* Rename Action */}
+                      {onRenameClick && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuFileId(null);
+                            onRenameClick(file);
+                          }}
+                          className="dropdown-item-hover"
+                          style={{
+                            background: "none",
+                            border: "none",
+                            borderRadius: "6px",
+                            padding: "0.45rem 0.65rem",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.6rem",
+                            cursor: "pointer",
+                            width: "100%",
+                            textAlign: "left",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          <svg style={{ width: "0.95rem", height: "0.95rem", color: darkMode ? "#cbd5e1" : "#475569" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                            <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z" />
+                          </svg>
+                          <span style={{ fontSize: "0.78rem", fontWeight: 600, color: darkMode ? "#ffffff" : "#0f172a" }}>Rename</span>
+                        </button>
+                      )}
 
                       {/* Delete Action */}
                       <button

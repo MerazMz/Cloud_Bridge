@@ -390,15 +390,40 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const isDeleted = typeof body.isDeleted === "boolean" ? body.isDeleted : false;
+    const data: any = {};
+
+    if (typeof body.isDeleted === "boolean") {
+      data.isDeleted = body.isDeleted;
+    }
+
+    if (typeof body.isShared === "boolean") {
+      data.isShared = body.isShared;
+    }
+
+    if (typeof body.fileName === "string") {
+      const cleanName = body.fileName.trim();
+      if (!cleanName) {
+        return errorResponse("File name cannot be empty.", 400);
+      }
+      data.fileName = cleanName;
+    }
+
+    if (Object.keys(data).length === 0) {
+      return errorResponse("No fields to update.", 400);
+    }
 
     const updatedFile = await prisma.file.update({
       where: { id: fileId },
-      data: { isDeleted },
+      data,
     });
 
-    log.info("File status updated", { fileId, isDeleted });
-    return successResponse(updatedFile, "File updated successfully.");
+    const formattedFile = {
+      ...updatedFile,
+      fileSize: Number(updatedFile.fileSize),
+    };
+
+    log.info("File updated", { fileId, ...data });
+    return successResponse(formattedFile, "File updated successfully.");
   } catch (error) {
     log.error("Failed to update file", error);
     return errorResponse("Failed to update file.", 500);
