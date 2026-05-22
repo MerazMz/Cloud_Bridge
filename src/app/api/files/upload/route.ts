@@ -71,7 +71,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    log.info("Ingesting stream upload", { fileName, fileSize, parentId, method: fileNameHeader ? "raw-stream" : "form-data" });
+    const compressVideoHeader = request.headers.get("x-compress-video");
+    const shouldCompress = compressVideoHeader === "true";
+
+    log.info("Ingesting stream upload", { fileName, fileSize, parentId, shouldCompress, method: fileNameHeader ? "raw-stream" : "form-data" });
 
     // 4. Stream to disk and queue background worker job
     const jobId = await uploadService.initiateUpload(
@@ -79,7 +82,8 @@ export async function POST(request: NextRequest) {
       fileName,
       fileSize,
       fileStream,
-      parentId || undefined
+      parentId || undefined,
+      shouldCompress
     );
 
     return new Response(

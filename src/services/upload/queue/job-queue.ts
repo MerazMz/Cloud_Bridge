@@ -69,21 +69,20 @@ export class UploadJobQueue {
   /**
    * Transition job to successfully completed. Removes the temporary disk file.
    */
-  static async completeJob(jobId: string) {
-    this.cancelledJobs.delete(jobId);
-
+  static async completeJob(jobId: string, tempFilePathOverride?: string) {
     const job = await prisma.uploadJob.update({
       where: { id: jobId },
       data: {
         status: "completed",
         progress: 100,
+        ...(tempFilePathOverride ? { tempFilePath: tempFilePathOverride } : {}),
       },
     });
 
     log.info("Upload job successfully completed", { jobId });
 
     // Clean up temporary file safely
-    await this.cleanupTempFile(job.tempFilePath);
+    await this.cleanupTempFile(tempFilePathOverride || job.tempFilePath);
 
     progressBroadcaster.broadcast(jobId, {
       jobId,
@@ -107,6 +106,13 @@ export class UploadJobQueue {
     });
 
     if (!job) return;
+
+    // Check if the job was explicitly cancelled by the user
+    if (job.status === "cancelled" || error.message === "Upload cancelled" || error.message.includes("cancelled")) {
+      log.info("Job was explicitly cancelled by user, skipping queue failure status updates.", { jobId });
+      await this.cleanupTempFile(job.tempFilePath);
+      return;
+    }
 
     this.cancelledJobs.delete(jobId);
 

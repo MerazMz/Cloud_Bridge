@@ -26,15 +26,26 @@ class UploadService {
     fileName: string,
     fileSize: number,
     fileStream: ReadableStream<Uint8Array>,
-    parentId?: string
+    parentId?: string,
+    shouldCompress?: boolean
   ): Promise<string> {
-    const safeFileName = `${Date.now()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+    const isVideo = fileName.toLowerCase().match(/\.(mp4|mov|webm|mkv|avi)$/i);
+    const compressMarker = (shouldCompress && isVideo) ? "compress_" : "";
+    const safeFileName = `${Date.now()}_${compressMarker}${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
     const tempFilePath = path.join(this.tempDir, safeFileName);
 
     log.info("Initiating streaming upload pipeline to disk", { fileName, fileSize, tempFilePath, parentId });
 
-    // 1. Zero-copy stream directly to server disk
-    await writeWebStreamToDisk(fileStream, tempFilePath);
+    try {
+      // 1. Zero-copy stream directly to server disk
+      await writeWebStreamToDisk(fileStream, tempFilePath);
+    } catch (err) {
+      // Safely delete the partial file in case of stream abortion
+      try {
+        await fs.unlink(tempFilePath);
+      } catch {}
+      throw err;
+    }
 
     log.debug("Zero-copy stream written to disk cache successfully", { tempFilePath });
 

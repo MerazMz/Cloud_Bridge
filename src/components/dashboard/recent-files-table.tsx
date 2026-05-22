@@ -12,6 +12,7 @@ interface RecentFilesTableProps {
   favorites: string[];
   handleToggleFavorite: (id: string) => void;
   handleShare: (id: string) => void;
+  handleRevokeShare: (id: string) => void;
   handleDownload: (id: string, name: string) => void;
   handleMoveToTrash: (file: DBFile) => void;
   getFileStyle: (mime: string, name: string) => { bg: string; color: string };
@@ -21,6 +22,9 @@ interface RecentFilesTableProps {
   getRelativeTime: (date: string) => string;
   activeMenuFileId: string | null;
   setActiveMenuFileId: (id: string | null) => void;
+  darkMode?: boolean;
+  onFileClick?: (file: DBFile) => void;
+  onRenameClick?: (file: DBFile) => void;
 }
 
 export function RecentFilesTable({
@@ -31,6 +35,7 @@ export function RecentFilesTable({
   favorites,
   handleToggleFavorite,
   handleShare,
+  handleRevokeShare,
   handleDownload,
   handleMoveToTrash,
   getFileStyle,
@@ -40,6 +45,9 @@ export function RecentFilesTable({
   getRelativeTime,
   activeMenuFileId,
   setActiveMenuFileId,
+  darkMode = false,
+  onFileClick,
+  onRenameClick,
 }: RecentFilesTableProps) {
   if (filesLoading && fileList.length === 0) {
     return (
@@ -53,7 +61,7 @@ export function RecentFilesTable({
     return (
       <div style={{ padding: "3rem 0", textAlign: "center" }}>
         <span style={{ fontSize: "2rem" }}>📭</span>
-        <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginTop: "0.5rem" }}>
+        <p style={{ color: darkMode ? "#94a3b8" : "#64748b", fontSize: "0.85rem", marginTop: "0.5rem" }}>
           No files available in this section.
         </p>
       </div>
@@ -63,12 +71,12 @@ export function RecentFilesTable({
   return (
     <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
       <thead>
-        <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-          <th style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600 }}>Name</th>
-          <th style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600 }}>Type</th>
-          <th style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600 }}>Size</th>
-          <th style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600 }}>Modified</th>
-          <th style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600, textAlign: "right" }}>Action</th>
+        <tr style={{ borderBottom: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)" }}>
+          <th style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: darkMode ? "#94a3b8" : "#64748b", fontWeight: 600 }}>Name</th>
+          <th style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: darkMode ? "#94a3b8" : "#64748b", fontWeight: 600 }}>Type</th>
+          <th style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: darkMode ? "#94a3b8" : "#64748b", fontWeight: 600 }}>Size</th>
+          <th style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: darkMode ? "#94a3b8" : "#64748b", fontWeight: 600 }}>Modified</th>
+          <th style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: darkMode ? "#94a3b8" : "#64748b", fontWeight: 600, textAlign: "right" }}>Action</th>
         </tr>
       </thead>
       <tbody>
@@ -81,21 +89,31 @@ export function RecentFilesTable({
           const ext = file.fileName.split(".").pop()?.toUpperCase() || "FILE";
 
           return (
-            <tr key={file.id} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+            <tr
+              key={file.id}
+              onClick={() => onFileClick?.(file)}
+              style={{
+                borderBottom: darkMode ? "1px solid rgba(255, 255, 255, 0.06)" : "1px solid rgba(0, 0, 0, 0.05)",
+                cursor: "pointer"
+              }}
+            >
               {/* Star, Name & Icon */}
               <td style={{ padding: "0.85rem 0.5rem", maxWidth: "260px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
                   <button
-                    onClick={() => handleToggleFavorite(file.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleFavorite(file.id);
+                    }}
                     style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
                     title={isStarred ? "Remove from Favorites" : "Add to Favorites"}
                   >
                     {isStarred ? (
-                      <svg style={{ width: "1rem", height: "1rem", color: "#F59E0B" }} viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2">
+                      <svg style={{ width: "1.05rem", height: "1.05rem", color: "#FBBF24" }} viewBox="0 0 24 24" fill="currentColor" stroke="#D97706" strokeWidth="1.5">
                         <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
                       </svg>
                     ) : (
-                      <svg style={{ width: "1rem", height: "1rem", color: "#94A3B8" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <svg style={{ width: "1.05rem", height: "1.05rem", color: darkMode ? "#475569" : "#cbd5e1" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
                       </svg>
                     )}
@@ -119,11 +137,11 @@ export function RecentFilesTable({
                             height: "30px",
                             borderRadius: "6px",
                             overflow: "hidden",
-                            border: "1px solid var(--border-default)",
+                            border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
-                            background: "var(--bg-secondary)",
+                            background: darkMode ? "rgba(30, 41, 59, 0.6)" : "#f1f5f9",
                             flexShrink: 0,
                           }}
                         >
@@ -149,7 +167,7 @@ export function RecentFilesTable({
                             height: "30px",
                             borderRadius: "6px",
                             overflow: "hidden",
-                            border: "1px solid var(--border-default)",
+                            border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
@@ -184,7 +202,7 @@ export function RecentFilesTable({
                     style={{
                       fontWeight: 700,
                       fontSize: "0.82rem",
-                      color: "var(--text-primary)",
+                      color: darkMode ? "#ffffff" : "#0f172a",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
@@ -196,17 +214,17 @@ export function RecentFilesTable({
               </td>
 
               {/* Type */}
-              <td style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: "var(--text-secondary)", fontWeight: 700 }}>
+              <td style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: darkMode ? "#cbd5e1" : "#475569", fontWeight: 700 }}>
                 {ext}
               </td>
 
               {/* Size */}
-              <td style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: "var(--text-secondary)", fontWeight: 500 }}>
+              <td style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: darkMode ? "#94a3b8" : "#64748b", fontWeight: 500 }}>
                 {formatBytes(file.fileSize)}
               </td>
 
               {/* Modified */}
-              <td style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: "var(--text-secondary)", fontWeight: 500 }}>
+              <td style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: darkMode ? "#94a3b8" : "#64748b", fontWeight: 500 }}>
                 {getRelativeTime(file.createdAt)}
               </td>
 
@@ -233,7 +251,7 @@ export function RecentFilesTable({
                     title="File Actions"
                     className="dropdown-item-hover"
                   >
-                    <svg style={{ width: "1.1rem", height: "1.1rem", color: "var(--text-muted)" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <svg style={{ width: "1.1rem", height: "1.1rem", color: darkMode ? "#94a3b8" : "#64748b" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <circle cx="12" cy="12" r="1"/>
                       <circle cx="12" cy="5" r="1"/>
                       <circle cx="12" cy="19" r="1"/>
@@ -249,12 +267,12 @@ export function RecentFilesTable({
                         top: "100%",
                         right: 0,
                         zIndex: 100,
-                        background: "var(--bg-card)",
-                        border: "1px solid var(--border-default)",
+                        background: darkMode ? "#1e293b" : "#ffffff",
+                        border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
                         borderRadius: "10px",
                         padding: "0.35rem",
                         minWidth: "140px",
-                        boxShadow: "var(--glass-shadow)",
+                        boxShadow: darkMode ? "0 10px 15px -3px rgba(0, 0, 0, 0.3)" : "0 10px 15px -3px rgba(15, 23, 42, 0.08)",
                         display: "flex",
                         flexDirection: "column",
                         gap: "0.2rem",
@@ -262,34 +280,64 @@ export function RecentFilesTable({
                       }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {/* Copy Link Action */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveMenuFileId(null);
-                          handleShare(file.id);
-                        }}
-                        className="dropdown-item-hover"
-                        style={{
-                          background: "none",
-                          border: "none",
-                          borderRadius: "6px",
-                          padding: "0.45rem 0.65rem",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "0.6rem",
-                          cursor: "pointer",
-                          width: "100%",
-                          textAlign: "left",
-                          transition: "all 0.15s ease",
-                        }}
-                      >
-                        <svg style={{ width: "0.95rem", height: "0.95rem", color: "var(--text-secondary)" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-                          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-                        </svg>
-                        <span style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text-primary)" }}>Copy Link</span>
-                      </button>
+                      {/* Copy Link / Revoke Access Action */}
+                      {file.isShared ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuFileId(null);
+                            handleRevokeShare(file.id);
+                          }}
+                          className="dropdown-item-hover"
+                          style={{
+                            background: "none",
+                            border: "none",
+                            borderRadius: "6px",
+                            padding: "0.45rem 0.65rem",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.6rem",
+                            cursor: "pointer",
+                            width: "100%",
+                            textAlign: "left",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          <svg style={{ width: "0.95rem", height: "0.95rem", color: "#ef4444" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                          </svg>
+                          <span style={{ fontSize: "0.78rem", fontWeight: 600, color: "#ef4444" }}>Revoke Access</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuFileId(null);
+                            handleShare(file.id);
+                          }}
+                          className="dropdown-item-hover"
+                          style={{
+                            background: "none",
+                            border: "none",
+                            borderRadius: "6px",
+                            padding: "0.45rem 0.65rem",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.6rem",
+                            cursor: "pointer",
+                            width: "100%",
+                            textAlign: "left",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          <svg style={{ width: "0.95rem", height: "0.95rem", color: darkMode ? "#cbd5e1" : "#475569" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                          </svg>
+                          <span style={{ fontSize: "0.78rem", fontWeight: 600, color: darkMode ? "#ffffff" : "#0f172a" }}>Copy Link</span>
+                        </button>
+                      )}
 
                       {/* Download Action */}
                       <button
@@ -317,14 +365,45 @@ export function RecentFilesTable({
                         {isDownloading ? (
                           <span style={{ fontSize: "0.75rem" }}>⏳</span>
                         ) : (
-                          <svg style={{ width: "0.95rem", height: "0.95rem", color: "var(--text-secondary)" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <svg style={{ width: "0.95rem", height: "0.95rem", color: darkMode ? "#cbd5e1" : "#475569" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 3v12"/>
                           </svg>
                         )}
-                        <span style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text-primary)" }}>
+                        <span style={{ fontSize: "0.78rem", fontWeight: 600, color: darkMode ? "#ffffff" : "#0f172a" }}>
                           {isDownloading ? "Downloading..." : "Download"}
                         </span>
                       </button>
+
+                      {/* Rename Action */}
+                      {onRenameClick && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuFileId(null);
+                            onRenameClick(file);
+                          }}
+                          className="dropdown-item-hover"
+                          style={{
+                            background: "none",
+                            border: "none",
+                            borderRadius: "6px",
+                            padding: "0.45rem 0.65rem",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.6rem",
+                            cursor: "pointer",
+                            width: "100%",
+                            textAlign: "left",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          <svg style={{ width: "0.95rem", height: "0.95rem", color: darkMode ? "#cbd5e1" : "#475569" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                            <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z" />
+                          </svg>
+                          <span style={{ fontSize: "0.78rem", fontWeight: 600, color: darkMode ? "#ffffff" : "#0f172a" }}>Rename</span>
+                        </button>
+                      )}
 
                       {/* Delete Action */}
                       <button
