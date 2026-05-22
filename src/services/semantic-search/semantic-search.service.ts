@@ -20,8 +20,10 @@ export class SemanticSearchService {
   private static serverRunning = false;
 
   private static async getPythonExecutable(): Promise<string> {
-    const venvPath = path.join(process.cwd(), "semantic_search", ".venv", "bin", "python3");
-    const venvPathAlt = path.join(process.cwd(), "semantic_search", ".venv", "bin", "python");
+    const parts1 = ["semantic_search", ".venv", "bin", "python3"];
+    const parts2 = ["semantic_search", ".venv", "bin", "python"];
+    const venvPath = path.join(process.cwd(), ...parts1);
+    const venvPathAlt = path.join(process.cwd(), ...parts2);
     try {
       await fs.access(venvPath);
       return venvPath;
@@ -61,10 +63,10 @@ export class SemanticSearchService {
     } catch (err: any) {
       log.debug("CLIP Python server not responding to ping, will attempt to spawn.", { message: err.message });
     }
-
     try {
       log.info("Attempting to start CLIP Python embedding server in the background...");
-      const scriptPath = path.join(process.cwd(), "semantic_search", "server.py");
+      const scriptParts = ["semantic_search", "server.py"];
+      const scriptPath = path.join(process.cwd(), ...scriptParts);
       const pythonPath = await this.getPythonExecutable();
       
       // Spawn background detached server process
@@ -127,7 +129,8 @@ export class SemanticSearchService {
     return new Promise(async (resolve, reject) => {
       try {
         const pythonPath = await this.getPythonExecutable();
-        const scriptPath = path.join(process.cwd(), "semantic_search", "embed.py");
+        const scriptParts = ["semantic_search", "embed.py"];
+        const scriptPath = path.join(process.cwd(), ...scriptParts);
         const args: string[] = [scriptPath, "--action", cliAction];
 
         if (options.filepath && options.action !== "file") {

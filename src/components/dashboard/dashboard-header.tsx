@@ -367,7 +367,7 @@ export function DashboardHeader({
         </div>
 
         {/* Profile Circle Dropdown */}
-        <div style={{ display: "flex", alignItems: "center", gap: "0.2rem", cursor: "pointer" }}>
+        <div style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
           <div
             style={{
               width: "34px",
@@ -385,9 +385,6 @@ export function DashboardHeader({
           >
             {userName.slice(0, 1)}
           </div>
-          <svg style={{ width: "0.75rem", height: "0.75rem", color: "#64748B" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-          </svg>
         </div>
       </div>
     </header>

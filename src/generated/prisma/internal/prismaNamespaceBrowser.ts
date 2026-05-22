@@ -115,6 +115,7 @@ export const FileScalarFieldEnum = {
   fileSize: 'fileSize',
   mimeType: 'mimeType',
   isDeleted: 'isDeleted',
+  isShared: 'isShared',
   parentId: 'parentId',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'

@@ -53,6 +53,7 @@ model File {
   fileSize          BigInt
   mimeType          String
   isDeleted         Boolean  @default(false)
+  isShared          Boolean  @default(false)
   parentId          String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt

@@ -30,6 +30,10 @@ export async function GET(
       return errorResponse("Shared file not found.", 404);
     }
 
+    if (!file.isShared) {
+      return errorResponse("Access to this shared file has been revoked.", 403);
+    }
+
     // Get the file owner's storage channel information
     const owner = await prisma.user.findUnique({
       where: { id: file.userId },

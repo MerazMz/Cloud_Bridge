@@ -18,6 +18,7 @@ export interface UploadOptions {
   fileSize: number;
   workers?: number;
   onProgress?: (percent: number, uploadedBytes: number, speed: string, eta: string) => void;
+  checkCancelled?: () => boolean | Promise<boolean>;
 }
 
 /**
@@ -25,7 +26,7 @@ export interface UploadOptions {
  * Memory overhead is strictly bounded to workers * chunk size (e.g. 8 * 512KB = 4MB).
  */
 export async function uploadToTelegramStream(options: UploadOptions): Promise<any> {
-  const { client, jobId, filePath, fileName, fileSize, workers = 8, onProgress } = options;
+  const { client, jobId, filePath, fileName, fileSize, workers = 8, onProgress, checkCancelled } = options;
 
   // Open file handle for reading
   const fHandle = await fs.open(filePath, "r");
@@ -55,6 +56,24 @@ export async function uploadToTelegramStream(options: UploadOptions): Promise<an
     return new Promise<any>(async (resolve, reject) => {
       async function startNextWorker() {
         if (hasFailed) return;
+
+        // Perform cancellation check
+        if (options.checkCancelled) {
+          try {
+            const isCancelled = await options.checkCancelled();
+            if (isCancelled) {
+              hasFailed = true;
+              uploadError = new Error("Upload cancelled");
+              try {
+                await fHandle.close();
+              } catch {}
+              reject(uploadError);
+              return;
+            }
+          } catch (cancelErr) {
+            log.error("Failed to run cancellation check", cancelErr);
+          }
+        }
 
         if (nextIndex >= partCount) {
           if (activeWorkers === 0 && !hasFailed) {
@@ -89,6 +108,9 @@ export async function uploadToTelegramStream(options: UploadOptions): Promise<an
             try {
               while (true) {
                 if (hasFailed) return;
+                if (checkCancelled && checkCancelled()) {
+                  throw new Error("Upload cancelled");
+                }
                 let sender;
                 try {
                   // Round-robin alternate among the available Telegram client TCP connections in the pool
