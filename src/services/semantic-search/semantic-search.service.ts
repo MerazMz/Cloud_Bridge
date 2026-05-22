@@ -19,6 +19,20 @@ export class SemanticSearchService {
   private static serverStarting = false;
   private static serverRunning = false;
 
+  private static async getPythonExecutable(): Promise<string> {
+    const venvPath = path.join(process.cwd(), "semantic_search", ".venv", "bin", "python3");
+    const venvPathAlt = path.join(process.cwd(), "semantic_search", ".venv", "bin", "python");
+    try {
+      await fs.access(venvPath);
+      return venvPath;
+    } catch {}
+    try {
+      await fs.access(venvPathAlt);
+      return venvPathAlt;
+    } catch {}
+    return "python3";
+  }
+
   public static async ensureServerRunning(): Promise<void> {
     if (this.serverRunning || this.serverStarting) return;
     this.serverStarting = true;
@@ -51,14 +65,15 @@ export class SemanticSearchService {
     try {
       log.info("Attempting to start CLIP Python embedding server in the background...");
       const scriptPath = path.join(process.cwd(), "semantic_search", "server.py");
+      const pythonPath = await this.getPythonExecutable();
       
       // Spawn background detached server process
-      const serverProcess = spawn("python3", [scriptPath, "--port", "5001"], {
+      const serverProcess = spawn(pythonPath, [scriptPath, "--port", "5001"], {
         detached: true,
         stdio: "ignore",
       });
       serverProcess.unref();
-      log.info("CLIP Python embedding server spawned in the background.");
+      log.info("CLIP Python embedding server spawned in the background using executable: " + pythonPath);
     } catch (err: any) {
       log.error("Failed to spawn CLIP Python embedding server", { error: err.message });
     } finally {
@@ -109,42 +124,47 @@ export class SemanticSearchService {
     }
 
     // 2. Fallback: Spawn CLI process if server is down/unresponsive
-    return new Promise((resolve, reject) => {
-      const scriptPath = path.join(process.cwd(), "semantic_search", "embed.py");
-      const args: string[] = [scriptPath, "--action", cliAction];
+    return new Promise(async (resolve, reject) => {
+      try {
+        const pythonPath = await this.getPythonExecutable();
+        const scriptPath = path.join(process.cwd(), "semantic_search", "embed.py");
+        const args: string[] = [scriptPath, "--action", cliAction];
 
-      if (options.filepath && options.action !== "file") {
-        args.push("--filepath", options.filepath);
-      }
-      if (options.filename) {
-        args.push("--filename", options.filename);
-      }
-      if (options.action === "file") {
-        args.push("--query", options.filename || "");
-      } else if (options.query) {
-        args.push("--query", options.query);
-      }
-
-      log.warn("Spawning CLI backup for CLIP Python embedding generator", { args });
-
-      // Max buffer size set to 10MB to handle large outputs if needed (though vector JSON is small)
-      execFile("python3", args, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
-        if (error) {
-          log.error("CLIP CLI execution failed. Stderr:", { stderr });
-          return reject(new Error(`CLIP Embedding generation failed: ${error.message}`));
+        if (options.filepath && options.action !== "file") {
+          args.push("--filepath", options.filepath);
+        }
+        if (options.filename) {
+          args.push("--filename", options.filename);
+        }
+        if (options.action === "file") {
+          args.push("--query", options.filename || "");
+        } else if (options.query) {
+          args.push("--query", options.query);
         }
 
-        try {
-          const result = JSON.parse(stdout.trim());
-          if (!result.success || !result.embedding) {
-            return reject(new Error(result.error || "No embedding in CLI output"));
+        log.warn("Spawning CLI backup for CLIP Python embedding generator", { args });
+
+        // Max buffer size set to 10MB to handle large outputs if needed (though vector JSON is small)
+        execFile(pythonPath, args, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+          if (error) {
+            log.error("CLIP CLI execution failed. Stderr:", { stderr });
+            return reject(new Error(`CLIP Embedding generation failed: ${error.message}`));
           }
-          resolve(result.embedding);
-        } catch (parseError) {
-          log.error("Failed to parse CLIP CLI output", { stdout, stderr });
-          reject(new Error(`Failed to parse CLIP CLI output: ${(parseError as Error).message}`));
-        }
-      });
+
+          try {
+            const result = JSON.parse(stdout.trim());
+            if (!result.success || !result.embedding) {
+              return reject(new Error(result.error || "No embedding in CLI output"));
+            }
+            resolve(result.embedding);
+          } catch (parseError) {
+            log.error("Failed to parse CLIP CLI output", { stdout, stderr });
+            reject(new Error(`Failed to parse CLIP CLI output: ${(parseError as Error).message}`));
+          }
+        });
+      } catch (err: any) {
+        reject(err);
+      }
     });
   }
 

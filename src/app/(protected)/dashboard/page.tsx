@@ -60,6 +60,7 @@ function DashboardContent() {
   const [darkMode, setDarkMode] = useState(false);
   const [deletingIds, setDeletingIds] = useState<Record<string, boolean>>({});
   const [downloadingIds, setDownloadingIds] = useState<Record<string, boolean>>({});
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Folder Directory Navigation States
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -284,6 +285,32 @@ function DashboardContent() {
         });
     }
   }, [user]);
+
+  const handleSyncSemanticSearch = async (force = false) => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    showToast("info", force ? "Forcing generation of all image embeddings in background..." : "Triggering semantic search sync for previous image files...");
+    try {
+      const res = await fetch("/api/files/backfill", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ force }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", "Semantic search sync successfully started in background.");
+        addNotification("success", force ? "Full embedding re-generation started." : "Missing image embedding backfill started.");
+      } else {
+        showToast("error", json.message || "Failed to trigger embedding sync.");
+      }
+    } catch (err: any) {
+      showToast("error", err.message || "An error occurred while connecting to backfill service.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Sequential Upload Queue Runner Effect Hook
   useEffect(() => {
@@ -1153,6 +1180,9 @@ function DashboardContent() {
         showBanner={showBanner}
         isBannerVisible={isBannerVisible}
         handleCloseBanner={handleCloseBanner}
+        onCreateFolderClick={() => setIsNewFolderModalOpen(true)}
+        onSyncClick={handleSyncSemanticSearch}
+        isSyncing={isSyncing}
       />
 
       {/* Conditional Rendering Based on Tabs */}
