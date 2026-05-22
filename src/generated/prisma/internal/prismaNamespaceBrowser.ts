@@ -54,6 +54,7 @@ export const ModelName = {
   User: 'User',
   Session: 'Session',
   File: 'File',
+  FileEmbedding: 'FileEmbedding',
   UploadJob: 'UploadJob'
 } as const
 
@@ -121,6 +122,15 @@ export const FileScalarFieldEnum = {
 } as const
 
 export type FileScalarFieldEnum = (typeof FileScalarFieldEnum)[keyof typeof FileScalarFieldEnum]
+
+
+export const FileEmbeddingScalarFieldEnum = {
+  fileId: 'fileId',
+  userId: 'userId',
+  embedding: 'embedding'
+} as const
+
+export type FileEmbeddingScalarFieldEnum = (typeof FileEmbeddingScalarFieldEnum)[keyof typeof FileEmbeddingScalarFieldEnum]
 
 
 export const UploadJobScalarFieldEnum = {

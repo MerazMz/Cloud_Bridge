@@ -1,6 +1,6 @@
 "use client";
 
-import { DBFile } from "@/app/(protected)/dashboard/page";
+import { DBFile } from "@/types/file.types";
 import { VideoThumbnail } from "./video-thumbnail";
 
 interface RecentActivityTimelineProps {

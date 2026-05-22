@@ -387,6 +387,7 @@ export const ModelName = {
   User: 'User',
   Session: 'Session',
   File: 'File',
+  FileEmbedding: 'FileEmbedding',
   UploadJob: 'UploadJob'
 } as const
 
@@ -403,7 +404,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "user" | "session" | "file" | "uploadJob"
+    modelProps: "user" | "session" | "file" | "fileEmbedding" | "uploadJob"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -629,6 +630,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    FileEmbedding: {
+      payload: Prisma.$FileEmbeddingPayload<ExtArgs>
+      fields: Prisma.FileEmbeddingFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.FileEmbeddingFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileEmbeddingPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.FileEmbeddingFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileEmbeddingPayload>
+        }
+        findFirst: {
+          args: Prisma.FileEmbeddingFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileEmbeddingPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.FileEmbeddingFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileEmbeddingPayload>
+        }
+        findMany: {
+          args: Prisma.FileEmbeddingFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileEmbeddingPayload>[]
+        }
+        create: {
+          args: Prisma.FileEmbeddingCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileEmbeddingPayload>
+        }
+        createMany: {
+          args: Prisma.FileEmbeddingCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.FileEmbeddingCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileEmbeddingPayload>[]
+        }
+        delete: {
+          args: Prisma.FileEmbeddingDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileEmbeddingPayload>
+        }
+        update: {
+          args: Prisma.FileEmbeddingUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileEmbeddingPayload>
+        }
+        deleteMany: {
+          args: Prisma.FileEmbeddingDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.FileEmbeddingUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.FileEmbeddingUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileEmbeddingPayload>[]
+        }
+        upsert: {
+          args: Prisma.FileEmbeddingUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$FileEmbeddingPayload>
+        }
+        aggregate: {
+          args: Prisma.FileEmbeddingAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateFileEmbedding>
+        }
+        groupBy: {
+          args: Prisma.FileEmbeddingGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.FileEmbeddingGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.FileEmbeddingCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.FileEmbeddingCountAggregateOutputType> | number
+        }
+      }
+    }
     UploadJob: {
       payload: Prisma.$UploadJobPayload<ExtArgs>
       fields: Prisma.UploadJobFieldRefs
@@ -792,6 +867,15 @@ export const FileScalarFieldEnum = {
 export type FileScalarFieldEnum = (typeof FileScalarFieldEnum)[keyof typeof FileScalarFieldEnum]
 
 
+export const FileEmbeddingScalarFieldEnum = {
+  fileId: 'fileId',
+  userId: 'userId',
+  embedding: 'embedding'
+} as const
+
+export type FileEmbeddingScalarFieldEnum = (typeof FileEmbeddingScalarFieldEnum)[keyof typeof FileEmbeddingScalarFieldEnum]
+
+
 export const UploadJobScalarFieldEnum = {
   id: 'id',
   userId: 'userId',
@@ -906,16 +990,16 @@ export type BooleanFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel,
 
 
 /**
- * Reference to a field of type 'Float'
+ * Reference to a field of type 'Float[]'
  */
-export type FloatFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Float'>
+export type ListFloatFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Float[]'>
     
 
 
 /**
- * Reference to a field of type 'Float[]'
+ * Reference to a field of type 'Float'
  */
-export type ListFloatFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Float[]'>
+export type FloatFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Float'>
     
 
 /**
@@ -1031,6 +1115,7 @@ export type GlobalOmitConfig = {
   user?: Prisma.UserOmit
   session?: Prisma.SessionOmit
   file?: Prisma.FileOmit
+  fileEmbedding?: Prisma.FileEmbeddingOmit
   uploadJob?: Prisma.UploadJobOmit
 }
 

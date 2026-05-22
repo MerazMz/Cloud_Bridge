@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { DBFile } from "@/app/(protected)/dashboard/page";
+import { DBFile } from "@/types/file.types";
 
 interface CommandPaletteProps {
   isOpen: boolean;

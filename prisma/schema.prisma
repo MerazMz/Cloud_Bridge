@@ -61,10 +61,21 @@ model File {
   user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   parent   File?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   children File[] @relation("FolderHierarchy")
+  embedding FileEmbedding?
 
   @@index([userId])
   @@index([parentId])
   @@map("files")
+}
+
+model FileEmbedding {
+  fileId    String   @id
+  userId    String
+  embedding Float[]
+  file      File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("file_embeddings")
 }
 
 model UploadJob {

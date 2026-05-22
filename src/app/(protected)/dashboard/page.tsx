@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, ChangeEvent, DragEvent, Suspense } from "react";
 import { useAuth } from "@/hooks/use-auth";
+import { useSemanticSearch } from "@/hooks/use-semantic-search";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useToast } from "@/components/ui/toast";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -29,6 +30,7 @@ export interface DBFile {
   isShared?: boolean;
   createdAt: string;
 }
+import { DBFile } from "@/types/file.types";
 
 export interface NotificationItem {
   id: string;
@@ -56,10 +58,16 @@ function DashboardContent() {
   const router = useRouter();
   const tab = searchParams.get("tab") || "dashboard";
 
+  const {
+    searchTerm,
+    setSearchTerm,
+    loading: semanticSearchLoading,
+    results: semanticSearchResults,
+  } = useSemanticSearch("", 600);
+
   const [files, setFiles] = useState<DBFile[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
   const [isDragActive, setIsDragActive] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [deletingIds, setDeletingIds] = useState<Record<string, boolean>>({});
@@ -121,6 +129,7 @@ function DashboardContent() {
       },
     });
   };
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Folder Directory Navigation States
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -535,6 +544,48 @@ function DashboardContent() {
       fetchAllFiles();
     }
   }, [user]);
+
+  // Trigger background embedding backfill on user authentication
+  useEffect(() => {
+    if (user) {
+      fetch("/api/files/backfill", { method: "POST" })
+        .then(async (res) => {
+          const json = await res.json();
+          if (json.success) {
+            console.log("Embedding backfill check completed:", json.message);
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to check/trigger embedding backfill:", err);
+        });
+    }
+  }, [user]);
+
+  const handleSyncSemanticSearch = async (force = false) => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    showToast("info", force ? "Forcing generation of all image embeddings in background..." : "Triggering semantic search sync for previous image files...");
+    try {
+      const res = await fetch("/api/files/backfill", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ force }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", "Semantic search sync successfully started in background.");
+        addNotification("success", force ? "Full embedding re-generation started." : "Missing image embedding backfill started.");
+      } else {
+        showToast("error", json.message || "Failed to trigger embedding sync.");
+      }
+    } catch (err: any) {
+      showToast("error", err.message || "An error occurred while connecting to backfill service.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Sequential Upload Queue Runner Effect Hook
   useEffect(() => {
@@ -1549,6 +1600,10 @@ function DashboardContent() {
     else if (selectedFolderCategory === "others") visibleFiles = otherFiles;
   }
 
+  // Filter visible files: use semantic search results if search query is active (except in Trash tab)
+  const finalFilteredFiles = tab === "trash"
+    ? visibleFiles.filter((f) => f.fileName.toLowerCase().includes(searchTerm.toLowerCase()))
+    : (searchTerm.trim() ? semanticSearchResults : visibleFiles);
   // Filter visible files by search bar
   const finalFilteredFiles = visibleFiles.filter((f) =>
     f.fileName.toLowerCase().includes(searchTerm.toLowerCase())
@@ -1640,6 +1695,97 @@ function DashboardContent() {
     }
   };
 
+
+  // Helper to determine if file is a viewer-supported image or video
+  const isImageFile = (file: DBFile) => {
+    const mimeLower = (file.mimeType || "").toLowerCase();
+    const nameLower = (file.fileName || "").toLowerCase();
+    return (
+      mimeLower.startsWith("image/") || 
+      mimeLower.startsWith("video/") ||
+      ((mimeLower === "application/octet-stream" || !mimeLower) && 
+       /\.(png|jpg|jpeg|gif|webp|svg|mp4|mov|webm|mkv|avi)$/i.test(nameLower))
+    );
+  };
+
+  // Helper to determine if file is a viewer-supported document
+  const isDocumentFile = (file: DBFile) => {
+    const mimeLower = (file.mimeType || "").toLowerCase();
+    const nameLower = (file.fileName || "").toLowerCase();
+    const ext = nameLower.split(".").pop()?.toLowerCase();
+    
+    // PDF
+    if (ext === "pdf" || mimeLower === "application/pdf") return true;
+    
+    // Text / Code
+    const textExtensions = [
+      "txt", "md", "json", "csv", "xml", "yaml", "yml", "ini", "log", "conf",
+      "js", "jsx", "ts", "tsx", "py", "html", "css", "go", "sh", "bat", "sql",
+      "cpp", "h", "java", "rs", "php", "rb", "swift", "kt", "scala"
+    ];
+    if (textExtensions.includes(ext || "") || mimeLower.startsWith("text/")) return true;
+    
+    // Office / Binary documents that we show fallbacks for
+    const docExtensions = [
+      "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp",
+      "zip", "tar", "rar", "7z", "gz"
+    ];
+    return docExtensions.includes(ext || "");
+  };
+
+  // List of all image files in current view mode
+  const activeImages = ((tab === "dashboard" || tab === "my-files") ? finalFilteredFiles.filter((f) => f.mimeType !== "folder") : finalFilteredFiles).filter(isImageFile);
+
+  // List of all document files in current view mode (includes images, videos, audio, PDFs, and docs for unified slideshow navigation)
+  const activeDocuments = ((tab === "dashboard" || tab === "my-files") ? finalFilteredFiles.filter((f) => f.mimeType !== "folder") : finalFilteredFiles).filter((f) => f.mimeType !== "folder");
+
+  const currentViewerDocIndex = activeDocuments.findIndex((doc) => doc.id === activeDocumentViewerFileId);
+  const currentViewerDoc = activeDocuments.find((doc) => doc.id === activeDocumentViewerFileId);
+
+  const handleNextViewerDoc = () => {
+    if (currentViewerDocIndex !== -1 && currentViewerDocIndex < activeDocuments.length - 1) {
+      setActiveDocumentViewerFileId(activeDocuments[currentViewerDocIndex + 1].id);
+    }
+  };
+
+  const handlePrevViewerDoc = () => {
+    if (currentViewerDocIndex !== -1 && currentViewerDocIndex > 0) {
+      setActiveDocumentViewerFileId(activeDocuments[currentViewerDocIndex - 1].id);
+    }
+  };
+
+  const currentViewerIndex = activeImages.findIndex((img) => img.id === activeImageViewerFileId);
+  const currentViewerImage = activeImages.find((img) => img.id === activeImageViewerFileId);
+  const isViewerVideo = currentViewerImage ? (
+    currentViewerImage.mimeType.startsWith("video/") || 
+    ((currentViewerImage.mimeType === "application/octet-stream" || !currentViewerImage.mimeType) && 
+     /\.(mp4|webm|ogg|mov)$/i.test(currentViewerImage.fileName))
+  ) : false;
+
+  const handleNextViewerImage = () => {
+    if (currentViewerIndex !== -1 && currentViewerIndex < activeImages.length - 1) {
+      setActiveImageViewerFileId(activeImages[currentViewerIndex + 1].id);
+      setImageZoom(1);
+      setImageRotation(0);
+      setImageFlipH(false);
+      setImageFlipV(false);
+    }
+  };
+
+  const handlePrevViewerImage = () => {
+    if (currentViewerIndex !== -1 && currentViewerIndex > 0) {
+      setActiveImageViewerFileId(activeImages[currentViewerIndex - 1].id);
+      setImageZoom(1);
+      setImageRotation(0);
+      setImageFlipH(false);
+      setImageFlipV(false);
+    }
+  };
+
+  // Filter visible files: use semantic search results if search query is active (except in Trash tab)
+  const finalFilteredFiles = tab === "trash"
+    ? visibleFiles.filter((f) => f.fileName.toLowerCase().includes(searchTerm.toLowerCase()))
+    : (searchTerm.trim() ? semanticSearchResults : visibleFiles);
 
   // Helper renderer for trash bin list
   function renderTrashTable(fileList: DBFile[]) {
@@ -1767,6 +1913,18 @@ function DashboardContent() {
           onCreateFolderClick={() => setIsNewFolderModalOpen(true)}
         />
       )}
+      <WelcomeBanner
+        userName={userName}
+        tab={tab}
+        triggerFileInput={triggerFileInput}
+        isUploading={isUploading}
+        showBanner={showBanner}
+        isBannerVisible={isBannerVisible}
+        handleCloseBanner={handleCloseBanner}
+        onCreateFolderClick={() => setIsNewFolderModalOpen(true)}
+        onSyncClick={handleSyncSemanticSearch}
+        isSyncing={isSyncing}
+      />
 
       {/* Conditional Rendering Based on Tabs */}
       {tab === "dashboard" && (
@@ -2894,13 +3052,25 @@ function DashboardContent() {
                 )}
 
                 {viewMode === "grid" ? (
-                  <div style={{
-                    display: "grid",
-                    gridTemplateColumns: `repeat(auto-fill, minmax(${gridSize}px, 1fr))`,
-                    gap: "1.2rem",
-                    padding: "0.25rem 0",
-                  }}>
-                    {((tab === "dashboard" || tab === "my-files") ? finalFilteredFiles.filter((f) => f.mimeType !== "folder") : finalFilteredFiles).map((file) => {
+                  (filesLoading || semanticSearchLoading) && finalFilteredFiles.length === 0 ? (
+                    <div style={{ padding: "3rem 0", display: "flex", justifyContent: "center", width: "100%" }}>
+                      <LoadingSpinner size="md" label="Searching files semantically..." />
+                    </div>
+                  ) : ((tab === "dashboard" || tab === "my-files") ? finalFilteredFiles.filter((f) => f.mimeType !== "folder") : finalFilteredFiles).length === 0 ? (
+                    <div style={{ padding: "3rem 0", textAlign: "center", width: "100%" }}>
+                      <span style={{ fontSize: "2rem" }}>📭</span>
+                      <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginTop: "0.5rem" }}>
+                        No files matching your search were found.
+                      </p>
+                    </div>
+                  ) : (
+                    <div style={{
+                      display: "grid",
+                      gridTemplateColumns: `repeat(auto-fill, minmax(${gridSize}px, 1fr))`,
+                      gap: "1.2rem",
+                      padding: "0.25rem 0",
+                    }}>
+                      {((tab === "dashboard" || tab === "my-files") ? finalFilteredFiles.filter((f) => f.mimeType !== "folder") : finalFilteredFiles).map((file) => {
                       const isStarred = favorites.includes(file.id);
                       const fileStyle = getFileStyle(file.mimeType, file.fileName);
                       
@@ -3282,10 +3452,10 @@ function DashboardContent() {
                       );
                     })}
                   </div>
-                ) : (
+                  )) : (
                   <RecentFilesTable
                     fileList={(tab === "dashboard" || tab === "my-files") ? finalFilteredFiles.filter((f) => f.mimeType !== "folder") : finalFilteredFiles}
-                    filesLoading={filesLoading}
+                    filesLoading={filesLoading || semanticSearchLoading}
                     deletingIds={deletingIds}
                     downloadingIds={downloadingIds}
                     favorites={favorites}
