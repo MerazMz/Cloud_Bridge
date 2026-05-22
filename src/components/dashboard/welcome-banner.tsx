@@ -2,8 +2,6 @@
 
 import { useState, useRef, useEffect } from "react";
 
-import { useState, useRef, useEffect } from "react";
-
 interface WelcomeBannerProps {
   userName: string;
   tab: string;
@@ -15,7 +13,6 @@ interface WelcomeBannerProps {
   onCreateFolderClick?: () => void;
   onSyncClick?: (force?: boolean) => void;
   isSyncing?: boolean;
-  onCreateFolderClick?: () => void;
 }
 
 export function WelcomeBanner({
@@ -29,29 +26,7 @@ export function WelcomeBanner({
   onCreateFolderClick,
   onSyncClick,
   isSyncing = false,
-  onCreateFolderClick,
 }: WelcomeBannerProps) {
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target as Node) &&
-        triggerRef.current &&
-        !triggerRef.current.contains(event.target as Node)
-      ) {
-        setIsDropdownOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, []);
-
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -75,7 +50,6 @@ export function WelcomeBanner({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem", width: "100%" }}>
-      <div className="animate-fade-in" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1.25rem", width: "100%", position: "relative", zIndex: 20 }}>
       <div className="animate-fade-in" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1.25rem", width: "100%", position: "relative", zIndex: 20 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
           <h1 style={{ fontSize: "1.55rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.03em" }}>
@@ -283,135 +257,6 @@ export function WelcomeBanner({
                     </button>
                   </>
                 )}
-              </div>
-            )}
-          <div style={{ position: "relative", zIndex: 50 }}>
-            <div style={{ display: "flex", alignItems: "center", borderRadius: "10px", background: "#FBBF24", overflow: "hidden", boxShadow: "0 3px 8px rgba(245, 158, 11, 0.15)" }}>
-              <button
-                onClick={triggerFileInput}
-                disabled={isUploading}
-                style={{
-                  background: "transparent",
-                  color: "#000000",
-                  padding: "0.55rem 1rem",
-                  fontWeight: 700,
-                  border: "none",
-                  fontSize: "0.88rem",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.4rem",
-                  cursor: "pointer",
-                }}
-              >
-                <svg style={{ width: "0.95rem", height: "0.95rem", color: "#000000" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
-                </svg>
-                Upload
-              </button>
-              <div style={{ width: "1px", height: "1.3rem", background: "rgba(0, 0, 0, 0.08)" }} />
-              <button
-                ref={triggerRef}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsDropdownOpen(!isDropdownOpen);
-                }}
-                disabled={isUploading}
-                style={{
-                  background: "transparent",
-                  color: "#000000",
-                  padding: "0.55rem 0.75rem",
-                  border: "none",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <svg style={{ width: "0.8rem", height: "0.8rem", color: "#000000" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
-              </button>
-            </div>
-
-            {isDropdownOpen && (
-              <div
-                ref={dropdownRef}
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 6px)",
-                  right: 0,
-                  background: "var(--bg-card, #ffffff)",
-                  border: "1px solid var(--border-default, #e2e8f0)",
-                  borderRadius: "8px",
-                  boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
-                  zIndex: 100,
-                  minWidth: "160px",
-                  padding: "4px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "2px",
-                }}
-              >
-                <button
-                  onClick={() => {
-                    setIsDropdownOpen(false);
-                    triggerFileInput();
-                  }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    width: "100%",
-                    padding: "8px 12px",
-                    fontSize: "0.82rem",
-                    fontWeight: 600,
-                    color: "var(--text-primary, #1e293b)",
-                    border: "none",
-                    background: "transparent",
-                    borderRadius: "6px",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    transition: "background 0.15s ease",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(245, 158, 11, 0.1)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                >
-                  <svg style={{ width: "0.85rem", height: "0.85rem", color: "#F59E0B" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
-                  </svg>
-                  Upload File
-                </button>
-                <button
-                  onClick={() => {
-                    setIsDropdownOpen(false);
-                    if (onCreateFolderClick) {
-                      onCreateFolderClick();
-                    }
-                  }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    width: "100%",
-                    padding: "8px 12px",
-                    fontSize: "0.82rem",
-                    fontWeight: 600,
-                    color: "var(--text-primary, #1e293b)",
-                    border: "none",
-                    background: "transparent",
-                    borderRadius: "6px",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    transition: "background 0.15s ease",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(245, 158, 11, 0.1)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                >
-                  <svg style={{ width: "0.85rem", height: "0.85rem", color: "#F59E0B" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                  </svg>
-                  Create Folder
-                </button>
               </div>
             )}
           </div>

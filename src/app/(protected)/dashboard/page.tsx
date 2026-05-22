@@ -21,15 +21,6 @@ import { DocumentViewer } from "@/components/dashboard/document-viewer";
 import { DirectorySelectorModal } from "@/components/dashboard/directory-selector-modal";
 import { ConfirmationModal } from "@/components/dashboard/confirmation-modal";
 
-export interface DBFile {
-  id: string;
-  fileName: string;
-  fileSize: number;
-  mimeType: string;
-  isDeleted?: boolean;
-  isShared?: boolean;
-  createdAt: string;
-}
 import { DBFile } from "@/types/file.types";
 
 export interface NotificationItem {
@@ -1604,10 +1595,6 @@ function DashboardContent() {
   const finalFilteredFiles = tab === "trash"
     ? visibleFiles.filter((f) => f.fileName.toLowerCase().includes(searchTerm.toLowerCase()))
     : (searchTerm.trim() ? semanticSearchResults : visibleFiles);
-  // Filter visible files by search bar
-  const finalFilteredFiles = visibleFiles.filter((f) =>
-    f.fileName.toLowerCase().includes(searchTerm.toLowerCase())
-  );
 
   // Helper to determine if file is a viewer-supported image or video
   const isImageFile = (file: DBFile) => {
@@ -1694,98 +1681,6 @@ function DashboardContent() {
       setImageFlipV(false);
     }
   };
-
-
-  // Helper to determine if file is a viewer-supported image or video
-  const isImageFile = (file: DBFile) => {
-    const mimeLower = (file.mimeType || "").toLowerCase();
-    const nameLower = (file.fileName || "").toLowerCase();
-    return (
-      mimeLower.startsWith("image/") || 
-      mimeLower.startsWith("video/") ||
-      ((mimeLower === "application/octet-stream" || !mimeLower) && 
-       /\.(png|jpg|jpeg|gif|webp|svg|mp4|mov|webm|mkv|avi)$/i.test(nameLower))
-    );
-  };
-
-  // Helper to determine if file is a viewer-supported document
-  const isDocumentFile = (file: DBFile) => {
-    const mimeLower = (file.mimeType || "").toLowerCase();
-    const nameLower = (file.fileName || "").toLowerCase();
-    const ext = nameLower.split(".").pop()?.toLowerCase();
-    
-    // PDF
-    if (ext === "pdf" || mimeLower === "application/pdf") return true;
-    
-    // Text / Code
-    const textExtensions = [
-      "txt", "md", "json", "csv", "xml", "yaml", "yml", "ini", "log", "conf",
-      "js", "jsx", "ts", "tsx", "py", "html", "css", "go", "sh", "bat", "sql",
-      "cpp", "h", "java", "rs", "php", "rb", "swift", "kt", "scala"
-    ];
-    if (textExtensions.includes(ext || "") || mimeLower.startsWith("text/")) return true;
-    
-    // Office / Binary documents that we show fallbacks for
-    const docExtensions = [
-      "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp",
-      "zip", "tar", "rar", "7z", "gz"
-    ];
-    return docExtensions.includes(ext || "");
-  };
-
-  // List of all image files in current view mode
-  const activeImages = ((tab === "dashboard" || tab === "my-files") ? finalFilteredFiles.filter((f) => f.mimeType !== "folder") : finalFilteredFiles).filter(isImageFile);
-
-  // List of all document files in current view mode (includes images, videos, audio, PDFs, and docs for unified slideshow navigation)
-  const activeDocuments = ((tab === "dashboard" || tab === "my-files") ? finalFilteredFiles.filter((f) => f.mimeType !== "folder") : finalFilteredFiles).filter((f) => f.mimeType !== "folder");
-
-  const currentViewerDocIndex = activeDocuments.findIndex((doc) => doc.id === activeDocumentViewerFileId);
-  const currentViewerDoc = activeDocuments.find((doc) => doc.id === activeDocumentViewerFileId);
-
-  const handleNextViewerDoc = () => {
-    if (currentViewerDocIndex !== -1 && currentViewerDocIndex < activeDocuments.length - 1) {
-      setActiveDocumentViewerFileId(activeDocuments[currentViewerDocIndex + 1].id);
-    }
-  };
-
-  const handlePrevViewerDoc = () => {
-    if (currentViewerDocIndex !== -1 && currentViewerDocIndex > 0) {
-      setActiveDocumentViewerFileId(activeDocuments[currentViewerDocIndex - 1].id);
-    }
-  };
-
-  const currentViewerIndex = activeImages.findIndex((img) => img.id === activeImageViewerFileId);
-  const currentViewerImage = activeImages.find((img) => img.id === activeImageViewerFileId);
-  const isViewerVideo = currentViewerImage ? (
-    currentViewerImage.mimeType.startsWith("video/") || 
-    ((currentViewerImage.mimeType === "application/octet-stream" || !currentViewerImage.mimeType) && 
-     /\.(mp4|webm|ogg|mov)$/i.test(currentViewerImage.fileName))
-  ) : false;
-
-  const handleNextViewerImage = () => {
-    if (currentViewerIndex !== -1 && currentViewerIndex < activeImages.length - 1) {
-      setActiveImageViewerFileId(activeImages[currentViewerIndex + 1].id);
-      setImageZoom(1);
-      setImageRotation(0);
-      setImageFlipH(false);
-      setImageFlipV(false);
-    }
-  };
-
-  const handlePrevViewerImage = () => {
-    if (currentViewerIndex !== -1 && currentViewerIndex > 0) {
-      setActiveImageViewerFileId(activeImages[currentViewerIndex - 1].id);
-      setImageZoom(1);
-      setImageRotation(0);
-      setImageFlipH(false);
-      setImageFlipV(false);
-    }
-  };
-
-  // Filter visible files: use semantic search results if search query is active (except in Trash tab)
-  const finalFilteredFiles = tab === "trash"
-    ? visibleFiles.filter((f) => f.fileName.toLowerCase().includes(searchTerm.toLowerCase()))
-    : (searchTerm.trim() ? semanticSearchResults : visibleFiles);
 
   // Helper renderer for trash bin list
   function renderTrashTable(fileList: DBFile[]) {
@@ -1911,20 +1806,10 @@ function DashboardContent() {
           isBannerVisible={isBannerVisible}
           handleCloseBanner={handleCloseBanner}
           onCreateFolderClick={() => setIsNewFolderModalOpen(true)}
+          onSyncClick={handleSyncSemanticSearch}
+          isSyncing={isSyncing}
         />
       )}
-      <WelcomeBanner
-        userName={userName}
-        tab={tab}
-        triggerFileInput={triggerFileInput}
-        isUploading={isUploading}
-        showBanner={showBanner}
-        isBannerVisible={isBannerVisible}
-        handleCloseBanner={handleCloseBanner}
-        onCreateFolderClick={() => setIsNewFolderModalOpen(true)}
-        onSyncClick={handleSyncSemanticSearch}
-        isSyncing={isSyncing}
-      />
 
       {/* Conditional Rendering Based on Tabs */}
       {tab === "dashboard" && (

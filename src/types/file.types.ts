@@ -8,6 +8,7 @@ export interface DBFile {
   fileSize: number;
   mimeType: string;
   isDeleted?: boolean;
+  isShared?: boolean;
   createdAt: string;
   similarity?: number;
 }

@@ -17,9 +17,8 @@ export interface UploadOptions {
   fileName: string;
   fileSize: number;
   workers?: number;
-  checkCancelled?: () => Promise<boolean>;
   onProgress?: (percent: number, uploadedBytes: number, speed: string, eta: string) => void;
-  checkCancelled?: () => boolean;
+  checkCancelled?: () => boolean | Promise<boolean>;
 }
 
 /**
@@ -27,7 +26,7 @@ export interface UploadOptions {
  * Memory overhead is strictly bounded to workers * chunk size (e.g. 8 * 512KB = 4MB).
  */
 export async function uploadToTelegramStream(options: UploadOptions): Promise<any> {
-  const { client, jobId, filePath, fileName, fileSize, workers = 8, onProgress } = options;
+  const { client, jobId, filePath, fileName, fileSize, workers = 8, onProgress, checkCancelled } = options;
 
   // Open file handle for reading
   const fHandle = await fs.open(filePath, "r");

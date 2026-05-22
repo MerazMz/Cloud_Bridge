@@ -283,13 +283,6 @@ class UploadWorkerPool {
         fileName: job.fileName,
         fileSize: uploadFileSize,
         workers: 16, // High-performance 16-worker parallel pipeline saturating dual TCP connections
-        checkCancelled: async () => {
-          const currentJob = await prisma.uploadJob.findUnique({
-            where: { id: job.id },
-            select: { status: true },
-          });
-          return currentJob ? currentJob.status === "cancelled" : false;
-        },
         onProgress: async (percent, uploadedBytes, speed, eta) => {
           await UploadJobQueue.updateJobProgress(job.id, percent, uploadedBytes, speed, eta);
         },
