@@ -63,6 +63,17 @@ function DashboardContent() {
   const [darkMode, setDarkMode] = useState(false);
   const [deletingIds, setDeletingIds] = useState<Record<string, boolean>>({});
   const [downloadingIds, setDownloadingIds] = useState<Record<string, boolean>>({});
+  const [selectedTrashIds, setSelectedTrashIds] = useState<Record<string, boolean>>({});
+  const [isBatchRestoring, setIsBatchRestoring] = useState(false);
+  const [isBatchDeleting, setIsBatchDeleting] = useState(false);
+  const selectedTrashIdsArray = Object.keys(selectedTrashIds).filter((id) => selectedTrashIds[id]);
+
+  // Active files multi-select states
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
+  const [selectedActiveIds, setSelectedActiveIds] = useState<Record<string, boolean>>({});
+  const [isBatchActiveDeleting, setIsBatchActiveDeleting] = useState(false);
+  const selectedActiveIdsArray = Object.keys(selectedActiveIds).filter((id) => selectedActiveIds[id]);
+
   const [compressVideo, setCompressVideo] = useState<boolean>(false);
 
   // Load video compression preference from localStorage on mount
@@ -1131,6 +1142,196 @@ function DashboardContent() {
     });
   };
 
+  // Active Checkbox Selection Toggle Helpers
+  const handleToggleSelectActive = (id: string) => {
+    setSelectedActiveIds((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
+  const handleToggleSelectAllActive = (fileList: DBFile[]) => {
+    const visibleIds = fileList.map((file) => file.id);
+    const allVisibleSelected = visibleIds.every((id) => selectedActiveIds[id]);
+
+    setSelectedActiveIds((prev) => {
+      const next = { ...prev };
+      visibleIds.forEach((id) => {
+        if (allVisibleSelected) {
+          delete next[id];
+        } else {
+          next[id] = true;
+        }
+      });
+      return next;
+    });
+  };
+
+  // Batch move to Trash (Soft Delete) for Active Files
+  const executeBatchMoveToTrash = async (fileIds: string[]) => {
+    setIsBatchActiveDeleting(true);
+    try {
+      const res = await fetch("/api/files/batch", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileIds, isDeleted: true }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("info", `${fileIds.length} items moved to trash.`);
+        
+        // Update local files state to reflect they are soft-deleted
+        setFiles((prev) =>
+          prev.map((f) => (fileIds.includes(f.id) ? { ...f, isDeleted: true } : f))
+        );
+        setSelectedActiveIds({});
+        setIsMultiSelectMode(false);
+        await fetchAllFiles();
+        await fetchFiles(currentFolderId);
+      } else {
+        showToast("error", json.message || "Failed to move selected items to trash.");
+      }
+    } catch {
+      showToast("error", "An error occurred while moving selected items to trash.");
+    } finally {
+      setIsBatchActiveDeleting(false);
+    }
+  };
+
+  const handleBatchMoveToTrash = (fileIds: string[]) => {
+    if (fileIds.length === 0) return;
+    showConfirm({
+      title: "Move Selected Items to Trash?",
+      message: `Are you sure you want to move these ${fileIds.length} items to the Trash bin?`,
+      confirmText: "Move to Trash",
+      cancelText: "Cancel",
+      type: "warning",
+      onConfirm: () => executeBatchMoveToTrash(fileIds),
+    });
+  };
+
+  // Checkbox Selection Toggle Helpers for Trash
+  const handleToggleSelectTrash = (id: string) => {
+    setSelectedTrashIds((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
+  const handleToggleSelectAllTrash = (fileList: DBFile[]) => {
+    const visibleIds = fileList.map((file) => file.id);
+    const allVisibleSelected = visibleIds.every((id) => selectedTrashIds[id]);
+
+    setSelectedTrashIds((prev) => {
+      const next = { ...prev };
+      visibleIds.forEach((id) => {
+        if (allVisibleSelected) {
+          delete next[id];
+        } else {
+          next[id] = true;
+        }
+      });
+      return next;
+    });
+  };
+
+  // Batch Restore from Trash (PATCH /api/files/batch with isDeleted: false)
+  const handleBatchRestore = async (fileIds: string[]) => {
+    if (fileIds.length === 0) return;
+    setIsBatchRestoring(true);
+    try {
+      const res = await fetch("/api/files/batch", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileIds, isDeleted: false }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", `${fileIds.length} items restored from trash.`);
+        
+        // Update local state instantly to maintain stunning responsiveness
+        setFiles((prev) =>
+          prev.map((f) => (fileIds.includes(f.id) ? { ...f, isDeleted: false } : f))
+        );
+        setSelectedTrashIds({});
+        await fetchAllFiles();
+        await fetchFiles(currentFolderId);
+      } else {
+        showToast("error", json.message || "Failed to restore selected items.");
+      }
+    } catch {
+      showToast("error", "An error occurred while restoring selected items.");
+    } finally {
+      setIsBatchRestoring(false);
+    }
+  };
+
+  // Batch Permanent Delete from Telegram & DB (DELETE /api/files/batch)
+  const executeBatchPermanentDelete = async (fileIds: string[]) => {
+    setIsBatchDeleting(true);
+    const deleteRecord: Record<string, boolean> = {};
+    fileIds.forEach((id) => {
+      deleteRecord[id] = true;
+    });
+    setDeletingIds((prev) => ({ ...prev, ...deleteRecord }));
+
+    try {
+      const res = await fetch("/api/files/batch", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileIds }),
+      });
+
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", `${fileIds.length} items permanently deleted.`);
+        setFiles((prev) => prev.filter((f) => !fileIds.includes(f.id)));
+        setSelectedTrashIds({});
+        await fetchAllFiles();
+        await fetchFiles(currentFolderId);
+      } else {
+        showToast("error", json.message || "Failed to delete selected items.");
+      }
+    } catch (err) {
+      showToast("error", "An error occurred while deleting selected items.");
+    } finally {
+      setIsBatchDeleting(false);
+      const deleteClearedRecord: Record<string, boolean> = {};
+      fileIds.forEach((id) => {
+        deleteClearedRecord[id] = false;
+      });
+      setDeletingIds((prev) => ({ ...prev, ...deleteClearedRecord }));
+    }
+  };
+
+  const handleBatchPermanentDelete = (fileIds: string[]) => {
+    if (fileIds.length === 0) return;
+    showConfirm({
+      title: "Permanently Delete Selected Items?",
+      message: `Warning: Permanently deleting these ${fileIds.length} items will permanently delete all contents inside any selected folders. This action is irreversible. Do you want to proceed?`,
+      confirmText: "Permanently Delete",
+      cancelText: "Cancel",
+      type: "danger",
+      onConfirm: () => executeBatchPermanentDelete(fileIds),
+    });
+  };
+
+  // Empty Trash (permanently deletes all currently soft-deleted items)
+  const handleEmptyTrash = () => {
+    const trashedFiles = allFiles.filter((f) => f.isDeleted);
+    if (trashedFiles.length === 0) return;
+    
+    const fileIds = trashedFiles.map((f) => f.id);
+    showConfirm({
+      title: "Empty Trash Bin?",
+      message: `Warning: This will permanently delete all ${trashedFiles.length} items currently in the trash bin, including all nested files and folders. This action is irreversible. Do you want to proceed?`,
+      confirmText: "Empty Trash",
+      cancelText: "Cancel",
+      type: "danger",
+      onConfirm: () => executeBatchPermanentDelete(fileIds),
+    });
+  };
+
   const handleShare = async (fileId: string) => {
     try {
       const response = await fetch(`/api/files/${fileId}`, {
@@ -1582,7 +1783,7 @@ function DashboardContent() {
   } else if (tab === "shared") {
     visibleFiles = activeFiles.filter((f) => f.isShared);
   } else if (tab === "trash") {
-    visibleFiles = files.filter((f) => f.isDeleted);
+    visibleFiles = allFiles.filter((f) => f.isDeleted);
   } else if (tab === "folders") {
     if (selectedFolderCategory === "images") visibleFiles = imageFiles;
     else if (selectedFolderCategory === "documents") visibleFiles = documentFiles;
@@ -1695,10 +1896,27 @@ function DashboardContent() {
       );
     }
 
+    const isAllSelected = fileList.length > 0 && fileList.every((file) => selectedTrashIds[file.id]);
+
     return (
       <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
         <thead>
           <tr style={{ borderBottom: "1px solid var(--border-default)" }}>
+            <th style={{ padding: "0.75rem 0.5rem", width: "40px" }}>
+              <input
+                type="checkbox"
+                checked={isAllSelected}
+                onChange={() => handleToggleSelectAllTrash(fileList)}
+                style={{
+                  width: "16px",
+                  height: "16px",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  accentColor: "var(--color-primary, #6366f1)",
+                  verticalAlign: "middle"
+                }}
+              />
+            </th>
             <th style={{ padding: "0.75rem 0.5rem", fontSize: "0.75rem", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 600 }}>Name</th>
             <th style={{ padding: "0.75rem 0.5rem", fontSize: "0.75rem", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 600 }}>Size</th>
             <th style={{ padding: "0.75rem 0.5rem", fontSize: "0.75rem", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 600, textAlign: "right" }}>Action</th>
@@ -1708,9 +1926,27 @@ function DashboardContent() {
           {fileList.map((file) => {
             const style = getFileStyle(file.mimeType, file.fileName);
             const isDeleting = deletingIds[file.id];
+            const isSelected = !!selectedTrashIds[file.id];
 
             return (
               <tr key={file.id} style={{ borderBottom: "1px solid var(--border-subtle)", opacity: isDeleting ? 0.5 : 1 }}>
+                {/* Checkbox */}
+                <td style={{ padding: "0.85rem 0.5rem", width: "40px" }}>
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => handleToggleSelectTrash(file.id)}
+                    disabled={isDeleting}
+                    style={{
+                      width: "16px",
+                      height: "16px",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      accentColor: "var(--color-primary, #6366f1)",
+                      verticalAlign: "middle"
+                    }}
+                  />
+                </td>
                 {/* Name */}
                 <td style={{ padding: "0.85rem 0.5rem", maxWidth: "240px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
@@ -2562,6 +2798,38 @@ function DashboardContent() {
               )}
             </div>
 
+            {tab === "trash" && (
+              <div style={{ display: "flex", alignItems: "center", gap: "0.65rem" }}>
+                <button
+                  disabled={finalFilteredFiles.length === 0 || isBatchDeleting}
+                  onClick={handleEmptyTrash}
+                  style={{
+                    background: "rgba(239, 68, 68, 0.12)",
+                    border: "1px solid rgba(239, 68, 68, 0.2)",
+                    color: "#EF4444",
+                    cursor: finalFilteredFiles.length === 0 ? "not-allowed" : "pointer",
+                    padding: "0.45rem 1rem",
+                    borderRadius: "8px",
+                    fontSize: "0.8rem",
+                    fontWeight: 700,
+                    fontFamily: "var(--font-outfit)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.45rem",
+                    transition: "all 0.2s ease-in-out",
+                    opacity: finalFilteredFiles.length === 0 ? 0.5 : 1,
+                  }}
+                  className="dropdown-item-hover"
+                  title="Empty Trash Bin Permanently"
+                >
+                  <svg style={{ width: "0.95rem", height: "0.95rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Empty Trash
+                </button>
+              </div>
+            )}
+
             {(tab === "dashboard" || tab === "my-files") && (
               <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexWrap: "wrap" }}>
                 {/* Segemented View Mode Controller */}
@@ -2734,12 +3002,29 @@ function DashboardContent() {
                   .map((folder) => (
                     <div
                       key={folder.id}
-                      onDoubleClick={() => handleEnterFolder(folder.id, folder.fileName)}
-                      onClick={() => handleEnterFolder(folder.id, folder.fileName)}
+                      onDoubleClick={(e) => {
+                        if (isMultiSelectMode) {
+                          e.stopPropagation();
+                        } else {
+                          handleEnterFolder(folder.id, folder.fileName);
+                        }
+                      }}
+                      onClick={(e) => {
+                        if (isMultiSelectMode) {
+                          e.stopPropagation();
+                          handleToggleSelectActive(folder.id);
+                        } else {
+                          handleEnterFolder(folder.id, folder.fileName);
+                        }
+                      }}
                       style={{
-                        background: darkMode ? "rgba(30, 41, 59, 0.45)" : "rgba(255, 255, 255, 0.9)",
+                        background: (isMultiSelectMode && selectedActiveIds[folder.id])
+                          ? (darkMode ? "rgba(245, 158, 11, 0.12)" : "rgba(245, 158, 11, 0.06)")
+                          : (darkMode ? "rgba(30, 41, 59, 0.45)" : "rgba(255, 255, 255, 0.9)"),
                         backdropFilter: "blur(12px)",
-                        border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
+                        border: (isMultiSelectMode && selectedActiveIds[folder.id])
+                          ? "1px solid #F59E0B"
+                          : (darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)"),
                         borderRadius: "12px",
                         padding: "0.85rem 1rem",
                         display: "flex",
@@ -2752,6 +3037,23 @@ function DashboardContent() {
                       }}
                       className="folder-card-hover"
                     >
+                      {isMultiSelectMode && (
+                        <input
+                          type="checkbox"
+                          checked={!!selectedActiveIds[folder.id]}
+                          onChange={() => handleToggleSelectActive(folder.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            width: "16px",
+                            height: "16px",
+                            accentColor: "#F59E0B",
+                            cursor: "pointer",
+                            marginRight: "0.25rem",
+                            flexShrink: 0,
+                          }}
+                        />
+                      )}
+
                       <div
                         style={{
                           width: "36px",
@@ -2817,7 +3119,7 @@ function DashboardContent() {
                           </svg>
                         </button>
 
-                        {activeMenuFileId === folder.id && (
+                         {activeMenuFileId === folder.id && (
                           <div
                             style={{
                               position: "absolute",
@@ -2832,6 +3134,37 @@ function DashboardContent() {
                               minWidth: "110px",
                             }}
                           >
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setIsMultiSelectMode(true);
+                                setSelectedActiveIds({ [folder.id]: true });
+                                setActiveMenuFileId(null);
+                              }}
+                              style={{
+                                width: "100%",
+                                textAlign: "left",
+                                background: "none",
+                                border: "none",
+                                color: darkMode ? "#ffffff" : "#0f172a",
+                                fontSize: "0.74rem",
+                                fontWeight: 700,
+                                padding: "0.4rem 0.6rem",
+                                borderRadius: "6px",
+                                cursor: "pointer",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "0.35rem",
+                                marginBottom: "0.25rem",
+                              }}
+                              className="dropdown-item-hover"
+                            >
+                              <svg style={{ width: "0.8rem", height: "0.8rem", color: darkMode ? "#cbd5e1" : "#475569" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                <polyline points="9 11 12 14 22 4"/>
+                              </svg>
+                              Select
+                            </button>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -2973,11 +3306,15 @@ function DashboardContent() {
                         <div
                           key={file.id}
                           style={{
-                            background: "transparent",
+                            background: (isMultiSelectMode && selectedActiveIds[file.id])
+                              ? (darkMode ? "rgba(245, 158, 11, 0.12)" : "rgba(245, 158, 11, 0.06)")
+                              : "transparent",
                             backdropFilter: "none",
-                            border: "none",
+                            border: (isMultiSelectMode && selectedActiveIds[file.id])
+                              ? "1px solid #F59E0B"
+                              : "none",
                             borderRadius: "14px",
-                            padding: 0,
+                            padding: "0.25rem",
                             display: "flex",
                             flexDirection: "column",
                             gap: "0.5rem",
@@ -2991,8 +3328,13 @@ function DashboardContent() {
                           className="folder-card-hover"
                           onMouseEnter={() => setHoveredFileId(file.id)}
                           onMouseLeave={() => setHoveredFileId(null)}
-                          onClick={() => {
-                            setActiveDocumentViewerFileId(file.id);
+                          onClick={(e) => {
+                            if (isMultiSelectMode) {
+                              e.stopPropagation();
+                              handleToggleSelectActive(file.id);
+                            } else {
+                              setActiveDocumentViewerFileId(file.id);
+                            }
                           }}
                         >
                           {/* Image/Video Preview or Icon slot */}
@@ -3042,36 +3384,72 @@ function DashboardContent() {
                               </div>
                             )}
 
-                            {/* Floating Star button (Visible on Hover or if Starred) */}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleToggleFavorite(file.id);
-                              }}
-                              style={{
-                                position: "absolute",
-                                top: "0.4rem",
-                                left: "0.4rem",
-                                background: darkMode ? "rgba(15, 23, 42, 0.75)" : "rgba(255, 255, 255, 0.85)",
-                                border: darkMode ? "none" : "1px solid rgba(0, 0, 0, 0.08)",
-                                cursor: "pointer",
-                                padding: "0.3rem",
-                                borderRadius: "50%",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                zIndex: 10,
-                                backdropFilter: "blur(4px)",
-                                opacity: (hoveredFileId === file.id || isStarred) ? 1 : 0,
-                                transform: (hoveredFileId === file.id || isStarred) ? "scale(1)" : "scale(0.85)",
-                                transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
-                              }}
-                              title={isStarred ? "Starred" : "Star"}
-                            >
-                              <svg style={{ width: "0.85rem", height: "0.85rem", color: isStarred ? "#FBBF24" : (darkMode ? "#94A3B8" : "#64748B") }} viewBox="0 0 24 24" fill={isStarred ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2.5">
-                                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-                              </svg>
-                            </button>
+                            {isMultiSelectMode ? (
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleToggleSelectActive(file.id);
+                                }}
+                                style={{
+                                  position: "absolute",
+                                  top: "0.4rem",
+                                  left: "0.4rem",
+                                  background: selectedActiveIds[file.id]
+                                    ? "#F59E0B"
+                                    : (darkMode ? "rgba(15, 23, 42, 0.75)" : "rgba(255, 255, 255, 0.85)"),
+                                  border: selectedActiveIds[file.id]
+                                    ? "none"
+                                    : (darkMode ? "1px solid rgba(255, 255, 255, 0.2)" : "1px solid rgba(0, 0, 0, 0.15)"),
+                                  cursor: "pointer",
+                                  width: "22px",
+                                  height: "22px",
+                                  borderRadius: "50%",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  zIndex: 10,
+                                  backdropFilter: "blur(4px)",
+                                  boxShadow: "0 2px 6px rgba(0, 0, 0, 0.15)",
+                                  transition: "all 0.2s ease"
+                                }}
+                              >
+                                {selectedActiveIds[file.id] && (
+                                  <svg style={{ width: "0.75rem", height: "0.75rem", color: "#ffffff" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="20 6 9 17 4 12" />
+                                  </svg>
+                                )}
+                              </div>
+                            ) : (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleToggleFavorite(file.id);
+                                }}
+                                style={{
+                                  position: "absolute",
+                                  top: "0.4rem",
+                                  left: "0.4rem",
+                                  background: darkMode ? "rgba(15, 23, 42, 0.75)" : "rgba(255, 255, 255, 0.85)",
+                                  border: darkMode ? "none" : "1px solid rgba(0, 0, 0, 0.08)",
+                                  cursor: "pointer",
+                                  padding: "0.3rem",
+                                  borderRadius: "50%",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  zIndex: 10,
+                                  backdropFilter: "blur(4px)",
+                                  opacity: (hoveredFileId === file.id || isStarred) ? 1 : 0,
+                                  transform: (hoveredFileId === file.id || isStarred) ? "scale(1)" : "scale(0.85)",
+                                  transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
+                                }}
+                                title={isStarred ? "Starred" : "Star"}
+                              >
+                                <svg style={{ width: "0.85rem", height: "0.85rem", color: isStarred ? "#FBBF24" : (darkMode ? "#94A3B8" : "#64748B") }} viewBox="0 0 24 24" fill={isStarred ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2.5">
+                                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                                </svg>
+                              </button>
+                            )}
 
                             {/* Floating Ellipsis Menu button */}
                             <div
@@ -3121,6 +3499,38 @@ function DashboardContent() {
                                 minWidth: "120px",
                               }}
                             >
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setIsMultiSelectMode(true);
+                                  setSelectedActiveIds({ [file.id]: true });
+                                  setActiveMenuFileId(null);
+                                }}
+                                style={{
+                                  width: "100%",
+                                  textAlign: "left",
+                                  background: "none",
+                                  border: "none",
+                                  color: darkMode ? "#ffffff" : "#0f172a",
+                                  fontSize: "0.74rem",
+                                  fontWeight: 700,
+                                  padding: "0.4rem 0.6rem",
+                                  borderRadius: "6px",
+                                  cursor: "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "0.35rem",
+                                  marginBottom: "0.25rem",
+                                }}
+                                className="dropdown-item-hover"
+                              >
+                                <svg style={{ width: "0.8rem", height: "0.8rem", color: darkMode ? "#cbd5e1" : "#475569" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                  <polyline points="9 11 12 14 22 4"/>
+                                </svg>
+                                <span>Select</span>
+                              </button>
+
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -3364,6 +3774,14 @@ function DashboardContent() {
                     onFileClick={(file) => {
                       setActiveDocumentViewerFileId(file.id);
                     }}
+                    isMultiSelectMode={isMultiSelectMode}
+                    selectedActiveIds={selectedActiveIds}
+                    handleToggleSelectActive={handleToggleSelectActive}
+                    handleToggleSelectAllActive={handleToggleSelectAllActive}
+                    onSelectClick={(file) => {
+                      setIsMultiSelectMode(true);
+                      setSelectedActiveIds({ [file.id]: true });
+                    }}
                   />
                 )}
               </div>
@@ -3562,6 +3980,270 @@ function DashboardContent() {
         darkMode={darkMode}
         type={confirmModal.type}
       />
+
+      {/* Centering Wrapper for Premium Glassmorphic Floating Batch Action Bar for Active Files */}
+      {isMultiSelectMode && selectedActiveIdsArray.length > 0 && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "2rem",
+            left: 0,
+            width: "100%",
+            display: "flex",
+            justifyContent: "center",
+            pointerEvents: "none",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              pointerEvents: "auto",
+              background: darkMode ? "rgba(15, 23, 42, 0.85)" : "rgba(255, 255, 255, 0.85)",
+              backdropFilter: "blur(12px)",
+              WebkitBackdropFilter: "blur(12px)",
+              border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(15, 23, 42, 0.1)",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)",
+              borderRadius: "16px",
+              padding: "0.75rem 1.25rem",
+              display: "flex",
+              alignItems: "center",
+              gap: "1.5rem",
+              animation: "slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+            }}
+          >
+            {/* Selected Count */}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+              <div
+                style={{
+                  background: "#F59E0B",
+                  color: "#ffffff",
+                  width: "24px",
+                  height: "24px",
+                  borderRadius: "50%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "0.75rem",
+                  fontWeight: 800,
+                }}
+              >
+                {selectedActiveIdsArray.length}
+              </div>
+              <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text-primary)" }}>
+                selected
+              </span>
+            </div>
+
+            {/* Divider */}
+            <div style={{ width: "1px", height: "24px", background: "var(--border-default)" }} />
+
+            {/* Action Buttons */}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+              {/* Move to Trash */}
+              <button
+                onClick={() => handleBatchMoveToTrash(selectedActiveIdsArray)}
+                disabled={isBatchActiveDeleting}
+                style={{
+                  background: "rgba(245, 158, 11, 0.12)",
+                  border: "1px solid rgba(245, 158, 11, 0.2)",
+                  color: "#F59E0B",
+                  cursor: "pointer",
+                  padding: "0.45rem 1rem",
+                  borderRadius: "8px",
+                  fontSize: "0.8rem",
+                  fontWeight: 700,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.4rem",
+                  transition: "all 0.2s ease",
+                }}
+              >
+                {isBatchActiveDeleting ? (
+                  <span>⏳ Moving to Trash...</span>
+                ) : (
+                  <>
+                    <svg style={{ width: "0.95rem", height: "0.95rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Move to Trash
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Cancel Selection */}
+            <button
+              onClick={() => {
+                setSelectedActiveIds({});
+                setIsMultiSelectMode(false);
+              }}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "var(--text-muted)",
+                padding: "0.25rem",
+                borderRadius: "50%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                marginLeft: "0.5rem",
+              }}
+              title="Cancel Selection"
+            >
+              <svg style={{ width: "1.1rem", height: "1.1rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Centering Wrapper for Premium Glassmorphic Floating Batch Action Bar */}
+      {tab === "trash" && selectedTrashIdsArray.length > 0 && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "2rem",
+            left: 0,
+            width: "100%",
+            display: "flex",
+            justifyContent: "center",
+            pointerEvents: "none",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              pointerEvents: "auto",
+              background: darkMode ? "rgba(15, 23, 42, 0.85)" : "rgba(255, 255, 255, 0.85)",
+              backdropFilter: "blur(12px)",
+              WebkitBackdropFilter: "blur(12px)",
+              border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(15, 23, 42, 0.1)",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)",
+              borderRadius: "16px",
+              padding: "0.75rem 1.25rem",
+              display: "flex",
+              alignItems: "center",
+              gap: "1.5rem",
+              animation: "slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+            }}
+          >
+            {/* Selected Count */}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+              <div
+                style={{
+                  background: "var(--color-primary, #6366f1)",
+                  color: "#ffffff",
+                  width: "24px",
+                  height: "24px",
+                  borderRadius: "50%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "0.75rem",
+                  fontWeight: 800,
+                }}
+              >
+                {selectedTrashIdsArray.length}
+              </div>
+              <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text-primary)" }}>
+                selected
+              </span>
+            </div>
+
+            {/* Divider */}
+            <div style={{ width: "1px", height: "24px", background: "var(--border-default)" }} />
+
+            {/* Action Buttons */}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+              {/* Restore Selected */}
+              <button
+                onClick={() => handleBatchRestore(selectedTrashIdsArray)}
+                disabled={isBatchRestoring}
+                style={{
+                  background: darkMode ? "rgba(255, 255, 255, 0.08)" : "rgba(15, 23, 42, 0.05)",
+                  border: darkMode ? "1px solid rgba(255, 255, 255, 0.05)" : "1px solid rgba(15, 23, 42, 0.05)",
+                  color: "var(--text-primary)",
+                  cursor: "pointer",
+                  padding: "0.45rem 1rem",
+                  borderRadius: "8px",
+                  fontSize: "0.8rem",
+                  fontWeight: 700,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.4rem",
+                  transition: "all 0.2s ease",
+                }}
+              >
+                {isBatchRestoring ? (
+                  <span>⏳ Restoring...</span>
+                ) : (
+                  <>
+                    <svg style={{ width: "0.95rem", height: "0.95rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+                    </svg>
+                    Restore Selected
+                  </>
+                )}
+              </button>
+
+              {/* Delete Selected */}
+              <button
+                onClick={() => handleBatchPermanentDelete(selectedTrashIdsArray)}
+                disabled={isBatchDeleting}
+                style={{
+                  background: "rgba(239, 68, 68, 0.12)",
+                  border: "1px solid rgba(239, 68, 68, 0.2)",
+                  color: "#EF4444",
+                  cursor: "pointer",
+                  padding: "0.45rem 1rem",
+                  borderRadius: "8px",
+                  fontSize: "0.8rem",
+                  fontWeight: 700,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.4rem",
+                  transition: "all 0.2s ease",
+                }}
+              >
+                {isBatchDeleting ? (
+                  <span>⏳ Deleting...</span>
+                ) : (
+                  <>
+                    <svg style={{ width: "0.95rem", height: "0.95rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Delete Permanently
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Deselect All */}
+            <button
+              onClick={() => setSelectedTrashIds({})}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "var(--text-muted)",
+                padding: "0.25rem",
+                borderRadius: "50%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                marginLeft: "0.5rem",
+              }}
+              title="Clear Selection"
+            >
+              <svg style={{ width: "1.1rem", height: "1.1rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Premium File Details Modal */}
       {selectedDetailsFile && (
