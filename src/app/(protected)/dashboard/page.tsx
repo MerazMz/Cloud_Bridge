@@ -1764,18 +1764,9 @@ function DashboardContent() {
           showBanner={showBanner}
           isBannerVisible={isBannerVisible}
           handleCloseBanner={handleCloseBanner}
+          onCreateFolderClick={() => setIsNewFolderModalOpen(true)}
         />
       )}
-      <WelcomeBanner
-        userName={userName}
-        tab={tab}
-        triggerFileInput={triggerFileInput}
-        isUploading={isUploading}
-        showBanner={showBanner}
-        isBannerVisible={isBannerVisible}
-        handleCloseBanner={handleCloseBanner}
-        onCreateFolderClick={() => setIsNewFolderModalOpen(true)}
-      />
 
       {/* Conditional Rendering Based on Tabs */}
       {tab === "dashboard" && (

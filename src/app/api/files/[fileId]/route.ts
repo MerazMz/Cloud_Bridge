@@ -511,18 +511,12 @@ export async function PATCH(
       return errorResponse("No fields to update.", 400);
     }
 
-    let updatedFile;
-    if (!isDeleted && file.mimeType === "folder") {
+    if (data.isDeleted === false && file.mimeType === "folder") {
       await recursivelyRestore(fileId);
-      updatedFile = await prisma.file.findUnique({
-        where: { id: fileId },
-      });
-    } else {
-      updatedFile = await prisma.file.update({
-        where: { id: fileId },
-        data: { isDeleted },
-      });
+    } else if (data.isDeleted === true && file.mimeType === "folder") {
+      await recursivelySoftDelete(fileId);
     }
+
     const updatedFile = await prisma.file.update({
       where: { id: fileId },
       data,
