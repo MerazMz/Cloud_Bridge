@@ -54,6 +54,7 @@ model File {
   mimeType          String
   isDeleted         Boolean  @default(false)
   isShared          Boolean  @default(false)
+  caption           String?  @db.Text
   parentId          String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt

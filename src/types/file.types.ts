@@ -9,6 +9,7 @@ export interface DBFile {
   mimeType: string;
   isDeleted?: boolean;
   isShared?: boolean;
+  caption?: string;
   createdAt: string;
   similarity?: number;
   parentId?: string | null;

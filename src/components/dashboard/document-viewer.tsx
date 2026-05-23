@@ -10,6 +10,7 @@ export interface DBFile {
   fileSize: number;
   mimeType: string;
   isShared?: boolean;
+  caption?: string;
   createdAt: string;
 }
 
@@ -1056,6 +1057,34 @@ export function DocumentViewer({
           </div>
         )}
       </div>
+
+      {/* AI Caption Display */}
+      {!isFullscreen && file.caption && (
+        <div
+          style={{
+            marginTop: "0.75rem",
+            background: "rgba(30, 41, 59, 0.7)",
+            backdropFilter: "blur(8px)",
+            border: "1px solid rgba(245, 158, 11, 0.3)",
+            borderRadius: "12px",
+            padding: "0.6rem 1.2rem",
+            maxWidth: "600px",
+            textAlign: "center",
+            boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.2rem",
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span style={{ fontSize: "0.65rem", textTransform: "uppercase", letterSpacing: "0.1em", color: "#F59E0B", fontWeight: 800 }}>
+            ✨ AI generated description
+          </span>
+          <p style={{ margin: 0, fontSize: "0.85rem", color: "#e2e8f0", fontWeight: 500, fontStyle: "italic", lineHeight: "1.4" }}>
+            "{file.caption}"
+          </p>
+        </div>
+      )}
 
       {/* Footer Label */}
       {!isFullscreen && (
