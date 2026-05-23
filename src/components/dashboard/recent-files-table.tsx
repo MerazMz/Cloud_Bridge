@@ -25,6 +25,21 @@ interface RecentFilesTableProps {
   darkMode?: boolean;
   onFileClick?: (file: DBFile) => void;
   onRenameClick?: (file: DBFile) => void;
+  isMultiSelectMode?: boolean;
+  selectedActiveIds?: Record<string, boolean>;
+  handleToggleSelectActive?: (id: string) => void;
+  handleToggleSelectAllActive?: (fileList: DBFile[]) => void;
+  onSelectClick?: (file: DBFile) => void;
+
+  // Drag & Drop Props
+  tab?: string;
+  onDragStart?: (e: React.DragEvent, item: DBFile) => void;
+  onDragEnd?: () => void;
+  onDragOver?: (e: React.DragEvent, item: DBFile) => void;
+  onDragLeave?: () => void;
+  onDrop?: (e: React.DragEvent, item: DBFile) => void;
+  draggedItem?: DBFile | null;
+  dragOverItem?: DBFile | null;
 }
 
 export function RecentFilesTable({
@@ -48,6 +63,19 @@ export function RecentFilesTable({
   darkMode = false,
   onFileClick,
   onRenameClick,
+  isMultiSelectMode = false,
+  selectedActiveIds = {},
+  handleToggleSelectActive,
+  handleToggleSelectAllActive,
+  onSelectClick,
+  tab = "dashboard",
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  draggedItem = null,
+  dragOverItem = null,
 }: RecentFilesTableProps) {
   if (filesLoading && fileList.length === 0) {
     return (
@@ -72,6 +100,21 @@ export function RecentFilesTable({
     <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
       <thead>
         <tr style={{ borderBottom: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)" }}>
+          {isMultiSelectMode && (
+            <th style={{ padding: "0.85rem 0.5rem", width: "40px" }}>
+              <input
+                type="checkbox"
+                checked={fileList.length > 0 && fileList.every((f) => selectedActiveIds[f.id])}
+                onChange={() => handleToggleSelectAllActive?.(fileList)}
+                style={{
+                  width: "16px",
+                  height: "16px",
+                  accentColor: "#F59E0B",
+                  cursor: "pointer",
+                }}
+              />
+            </th>
+          )}
           <th style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: darkMode ? "#94a3b8" : "#64748b", fontWeight: 600 }}>Name</th>
           <th style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: darkMode ? "#94a3b8" : "#64748b", fontWeight: 600 }}>Type</th>
           <th style={{ padding: "0.85rem 0.5rem", fontSize: "0.78rem", color: darkMode ? "#94a3b8" : "#64748b", fontWeight: 600 }}>Size</th>
@@ -91,12 +134,48 @@ export function RecentFilesTable({
           return (
             <tr
               key={file.id}
-              onClick={() => onFileClick?.(file)}
+              draggable={tab === "my-files" && !isMultiSelectMode}
+              onDragStart={(e) => onDragStart?.(e, file)}
+              onDragEnd={onDragEnd}
+              onDragOver={(e) => onDragOver?.(e, file)}
+              onDragLeave={onDragLeave}
+              onDrop={(e) => onDrop?.(e, file)}
+              onClick={(e) => {
+                if (isMultiSelectMode) {
+                  e.stopPropagation();
+                  handleToggleSelectActive?.(file.id);
+                } else {
+                  onFileClick?.(file);
+                }
+              }}
               style={{
                 borderBottom: darkMode ? "1px solid rgba(255, 255, 255, 0.06)" : "1px solid rgba(0, 0, 0, 0.05)",
-                cursor: "pointer"
+                cursor: "pointer",
+                background: (isMultiSelectMode && selectedActiveIds[file.id])
+                  ? (darkMode ? "rgba(245, 158, 11, 0.08)" : "rgba(245, 158, 11, 0.04)")
+                  : "transparent",
               }}
+              className={`folder-card-hover ${
+                tab === "my-files" && !isMultiSelectMode ? "dnd-draggable" : ""
+              } ${draggedItem?.id === file.id ? "dnd-dragged" : ""} ${
+                dragOverItem?.id === file.id ? "dnd-dragover" : ""
+              }`}
             >
+              {isMultiSelectMode && (
+                <td style={{ padding: "0.85rem 0.5rem", width: "40px" }} onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={!!selectedActiveIds[file.id]}
+                    onChange={() => handleToggleSelectActive?.(file.id)}
+                    style={{
+                      width: "16px",
+                      height: "16px",
+                      accentColor: "#F59E0B",
+                      cursor: "pointer",
+                    }}
+                  />
+                </td>
+              )}
               {/* Star, Name & Icon */}
               <td style={{ padding: "0.85rem 0.5rem", maxWidth: "260px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
@@ -295,6 +374,35 @@ export function RecentFilesTable({
                       }}
                       onClick={(e) => e.stopPropagation()}
                     >
+                      {/* Select Action */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveMenuFileId(null);
+                          onSelectClick?.(file);
+                        }}
+                        className="dropdown-item-hover"
+                        style={{
+                          background: "none",
+                          border: "none",
+                          borderRadius: "6px",
+                          padding: "0.45rem 0.65rem",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.6rem",
+                          cursor: "pointer",
+                          width: "100%",
+                          textAlign: "left",
+                          transition: "all 0.15s ease",
+                        }}
+                      >
+                        <svg style={{ width: "0.95rem", height: "0.95rem", color: darkMode ? "#cbd5e1" : "#475569" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                          <polyline points="9 11 12 14 22 4"/>
+                        </svg>
+                        <span style={{ fontSize: "0.78rem", fontWeight: 600, color: darkMode ? "#ffffff" : "#0f172a" }}>Select</span>
+                      </button>
+
                       {/* Copy Link / Revoke Access Action */}
                       {file.isShared ? (
                         <button

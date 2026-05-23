@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, ChangeEvent, DragEvent, Suspense } from "react";
+import { useState, useEffect, useRef, ChangeEvent, DragEvent, Suspense, useMemo } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { useSemanticSearch } from "@/hooks/use-semantic-search";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -63,6 +63,42 @@ function DashboardContent() {
   const [darkMode, setDarkMode] = useState(false);
   const [deletingIds, setDeletingIds] = useState<Record<string, boolean>>({});
   const [downloadingIds, setDownloadingIds] = useState<Record<string, boolean>>({});
+  const [selectedTrashIds, setSelectedTrashIds] = useState<Record<string, boolean>>({});
+  const [isBatchRestoring, setIsBatchRestoring] = useState(false);
+  const [isBatchDeleting, setIsBatchDeleting] = useState(false);
+  const selectedTrashIdsArray = Object.keys(selectedTrashIds).filter((id) => selectedTrashIds[id]);
+
+  // Active files multi-select states
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
+  const [selectedActiveIds, setSelectedActiveIds] = useState<Record<string, boolean>>({});
+  const [isBatchActiveDeleting, setIsBatchActiveDeleting] = useState(false);
+  const selectedActiveIdsArray = Object.keys(selectedActiveIds).filter((id) => selectedActiveIds[id]);
+
+  // Sorting and Filtering States for My Files
+  const [sortBy, setSortBy] = useState<"newest" | "oldest" | "largest" | "smallest">("newest");
+  const [filterType, setFilterType] = useState<"all" | "image" | "document" | "media" | "archive" | "pdf" | "other">("all");
+  const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
+
+  // Drag & Drop States for My Files
+  const [draggedItem, setDraggedItem] = useState<DBFile | null>(null);
+  const [dragOverItem, setDragOverItem] = useState<DBFile | null>(null);
+  const [mergeModal, setMergeModal] = useState<{
+    isOpen: boolean;
+    fileA: DBFile;
+    fileB: DBFile;
+    folderName: string;
+  } | null>(null);
+  const [undoStack, setUndoStack] = useState<Array<{
+    action: "move" | "create_folder_group";
+    items: Array<{ id: string; oldParentId: string | null }>;
+    newFolderId?: string;
+  }>>([]);
+
+  // Animation states for DND
+  const [mergingSourceId, setMergingSourceId] = useState<string | null>(null);
+  const [mergingTargetId, setMergingTargetId] = useState<string | null>(null);
+  const [newFolderScaleInId, setNewFolderScaleInId] = useState<string | null>(null);
+
   const [compressVideo, setCompressVideo] = useState<boolean>(false);
 
   // Load video compression preference from localStorage on mount
@@ -1131,6 +1167,443 @@ function DashboardContent() {
     });
   };
 
+  // Active Checkbox Selection Toggle Helpers
+  const handleToggleSelectActive = (id: string) => {
+    setSelectedActiveIds((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
+  const handleToggleSelectAllActive = (fileList: DBFile[]) => {
+    const visibleIds = fileList.map((file) => file.id);
+    const allVisibleSelected = visibleIds.every((id) => selectedActiveIds[id]);
+
+    setSelectedActiveIds((prev) => {
+      const next = { ...prev };
+      visibleIds.forEach((id) => {
+        if (allVisibleSelected) {
+          delete next[id];
+        } else {
+          next[id] = true;
+        }
+      });
+      return next;
+    });
+  };
+
+  // Drag & Drop Handlers for My Files
+  const handleDragStart = (e: React.DragEvent, item: DBFile) => {
+    if (tab !== "my-files" || isMultiSelectMode) {
+      e.preventDefault();
+      return;
+    }
+    setDraggedItem(item);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", item.id);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedItem(null);
+    setDragOverItem(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent, item: DBFile) => {
+    e.preventDefault();
+    if (!draggedItem || draggedItem.id === item.id) return;
+
+    // Prevent loop: a folder cannot be dropped inside its descendants
+    if (draggedItem.mimeType === "folder") {
+      const isDescendant = (parentId: string | null): boolean => {
+        if (!parentId) return false;
+        if (parentId === draggedItem.id) return true;
+        const parentFolder = allFiles.find((f) => f.id === parentId);
+        return parentFolder ? isDescendant(parentFolder.parentId || null) : false;
+      };
+
+      if (item.mimeType === "folder" && (item.id === draggedItem.id || isDescendant(item.id))) {
+        return;
+      }
+    }
+
+    setDragOverItem(item);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverItem(null);
+  };
+
+  const handleItemDrop = async (e: React.DragEvent, target: DBFile) => {
+    e.preventDefault();
+    setDragOverItem(null);
+    if (!draggedItem || draggedItem.id === target.id) return;
+
+    // FEATURE 1: Drag File onto File -> Create Folder
+    if (draggedItem.mimeType !== "folder" && target.mimeType !== "folder") {
+      setMergeModal({ isOpen: true, fileA: draggedItem, fileB: target, folderName: "" });
+      return;
+    }
+
+    // FEATURE 2 & 3: Drag File/Folder into Folder -> Move / Nest
+    if (target.mimeType === "folder") {
+      // Loop prevention check for folder nesting
+      const isDescendant = (parentId: string | null | undefined): boolean => {
+        if (!parentId) return false;
+        if (parentId === draggedItem.id) return true;
+        const parentFolder = allFiles.find((f) => f.id === parentId);
+        return parentFolder ? isDescendant(parentFolder.parentId) : false;
+      };
+
+      if (draggedItem.mimeType === "folder" && isDescendant(target.id)) {
+        showToast("info", "Cannot move a folder into one of its subfolders.");
+        return;
+      }
+
+      if (draggedItem.parentId === target.id) return;
+
+      // Start visually premium merge transitions
+      setMergingSourceId(draggedItem.id);
+      setMergingTargetId(target.id);
+
+      setTimeout(async () => {
+        await moveItem(draggedItem.id, target.id);
+        setMergingSourceId(null);
+        setMergingTargetId(null);
+      }, 400);
+    }
+  };
+
+  const moveItem = async (itemId: string, targetParentId: string | null) => {
+    const item = allFiles.find((f) => f.id === itemId);
+    if (!item) return;
+    const oldParentId = item.parentId || null;
+
+    try {
+      const res = await fetch(`/api/files/${itemId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parentId: targetParentId }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", `Moved "${item.fileName}" successfully.`);
+        setUndoStack((prev) => [
+          { action: "move", items: [{ id: itemId, oldParentId }] },
+          ...prev,
+        ]);
+        fetchFiles(currentFolderId);
+        fetchAllFiles();
+      } else {
+        showToast("error", json.message || "Failed to move item.");
+      }
+    } catch {
+      showToast("error", "An error occurred while moving item.");
+    }
+  };
+
+  const handleMergeCreateFolder = async (folderName: string) => {
+    if (!mergeModal || !folderName.trim()) return;
+    const { fileA, fileB } = mergeModal;
+    setMergeModal(null);
+
+    setMergingSourceId(fileA.id);
+    setMergingTargetId(fileB.id);
+
+    try {
+      // 1. Create Folder
+      const res = await fetch("/api/folders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: folderName.trim(),
+          parentId: currentFolderId,
+        }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        const newFolder = json.folder;
+        const newFolderId = newFolder.id;
+        
+        setNewFolderScaleInId(newFolderId);
+
+        // 2. Move both files inside new folder
+        const moveA = fetch(`/api/files/${fileA.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ parentId: newFolderId }),
+        });
+        const moveB = fetch(`/api/files/${fileB.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ parentId: newFolderId }),
+        });
+
+        await Promise.all([moveA, moveB]);
+        showToast("success", `Created folder "${folderName.trim()}" containing both files.`);
+
+        setUndoStack((prev) => [
+          {
+            action: "create_folder_group",
+            items: [
+              { id: fileA.id, oldParentId: fileA.parentId || null },
+              { id: fileB.id, oldParentId: fileB.parentId || null },
+            ],
+            newFolderId,
+          },
+          ...prev,
+        ]);
+
+        setTimeout(() => {
+          setNewFolderScaleInId(null);
+        }, 800);
+
+        fetchFiles(currentFolderId);
+        fetchAllFiles();
+      } else {
+        showToast("error", json.message || "Failed to create folder.");
+      }
+    } catch {
+      showToast("error", "An error occurred while merging files.");
+    } finally {
+      setMergingSourceId(null);
+      setMergingTargetId(null);
+    }
+  };
+
+  const undoLastAction = async () => {
+    if (undoStack.length === 0) return;
+    const lastAction = undoStack[0];
+    setUndoStack((prev) => prev.slice(1));
+
+    try {
+      if (lastAction.action === "move") {
+        const { id, oldParentId } = lastAction.items[0];
+        const res = await fetch(`/api/files/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ parentId: oldParentId }),
+        });
+        const json = await res.json();
+        if (json.success) {
+          showToast("info", "Move undone.");
+          fetchFiles(currentFolderId);
+          fetchAllFiles();
+        } else {
+          showToast("error", "Failed to undo move.");
+        }
+      } else if (lastAction.action === "create_folder_group") {
+        // Move files back to original parents
+        const moves = lastAction.items.map((item) =>
+          fetch(`/api/files/${item.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ parentId: item.oldParentId }),
+          })
+        );
+        await Promise.all(moves);
+
+        // Delete new folder
+        if (lastAction.newFolderId) {
+          await fetch(`/api/files/${lastAction.newFolderId}?permanent=true`, {
+            method: "DELETE",
+          });
+        }
+
+        showToast("info", "Folder merge undone.");
+        fetchFiles(currentFolderId);
+        fetchAllFiles();
+      }
+    } catch {
+      showToast("error", "An error occurred while undoing last action.");
+    }
+  };
+
+  // Keyboard shortcut listener for Ctrl+Z undo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        if (
+          document.activeElement?.tagName === "INPUT" ||
+          document.activeElement?.tagName === "TEXTAREA" ||
+          (document.activeElement as HTMLElement)?.isContentEditable
+        ) {
+          return;
+        }
+        e.preventDefault();
+        undoLastAction();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [undoStack]);
+
+  // Batch move to Trash (Soft Delete) for Active Files
+  const executeBatchMoveToTrash = async (fileIds: string[]) => {
+    setIsBatchActiveDeleting(true);
+    try {
+      const res = await fetch("/api/files/batch", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileIds, isDeleted: true }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("info", `${fileIds.length} items moved to trash.`);
+        
+        // Update local files state to reflect they are soft-deleted
+        setFiles((prev) =>
+          prev.map((f) => (fileIds.includes(f.id) ? { ...f, isDeleted: true } : f))
+        );
+        setSelectedActiveIds({});
+        setIsMultiSelectMode(false);
+        await fetchAllFiles();
+        await fetchFiles(currentFolderId);
+      } else {
+        showToast("error", json.message || "Failed to move selected items to trash.");
+      }
+    } catch {
+      showToast("error", "An error occurred while moving selected items to trash.");
+    } finally {
+      setIsBatchActiveDeleting(false);
+    }
+  };
+
+  const handleBatchMoveToTrash = (fileIds: string[]) => {
+    if (fileIds.length === 0) return;
+    showConfirm({
+      title: "Move Selected Items to Trash?",
+      message: `Are you sure you want to move these ${fileIds.length} items to the Trash bin?`,
+      confirmText: "Move to Trash",
+      cancelText: "Cancel",
+      type: "warning",
+      onConfirm: () => executeBatchMoveToTrash(fileIds),
+    });
+  };
+
+  // Checkbox Selection Toggle Helpers for Trash
+  const handleToggleSelectTrash = (id: string) => {
+    setSelectedTrashIds((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
+  const handleToggleSelectAllTrash = (fileList: DBFile[]) => {
+    const visibleIds = fileList.map((file) => file.id);
+    const allVisibleSelected = visibleIds.every((id) => selectedTrashIds[id]);
+
+    setSelectedTrashIds((prev) => {
+      const next = { ...prev };
+      visibleIds.forEach((id) => {
+        if (allVisibleSelected) {
+          delete next[id];
+        } else {
+          next[id] = true;
+        }
+      });
+      return next;
+    });
+  };
+
+  // Batch Restore from Trash (PATCH /api/files/batch with isDeleted: false)
+  const handleBatchRestore = async (fileIds: string[]) => {
+    if (fileIds.length === 0) return;
+    setIsBatchRestoring(true);
+    try {
+      const res = await fetch("/api/files/batch", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileIds, isDeleted: false }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", `${fileIds.length} items restored from trash.`);
+        
+        // Update local state instantly to maintain stunning responsiveness
+        setFiles((prev) =>
+          prev.map((f) => (fileIds.includes(f.id) ? { ...f, isDeleted: false } : f))
+        );
+        setSelectedTrashIds({});
+        await fetchAllFiles();
+        await fetchFiles(currentFolderId);
+      } else {
+        showToast("error", json.message || "Failed to restore selected items.");
+      }
+    } catch {
+      showToast("error", "An error occurred while restoring selected items.");
+    } finally {
+      setIsBatchRestoring(false);
+    }
+  };
+
+  // Batch Permanent Delete from Telegram & DB (DELETE /api/files/batch)
+  const executeBatchPermanentDelete = async (fileIds: string[]) => {
+    setIsBatchDeleting(true);
+    const deleteRecord: Record<string, boolean> = {};
+    fileIds.forEach((id) => {
+      deleteRecord[id] = true;
+    });
+    setDeletingIds((prev) => ({ ...prev, ...deleteRecord }));
+
+    try {
+      const res = await fetch("/api/files/batch", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileIds }),
+      });
+
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", `${fileIds.length} items permanently deleted.`);
+        setFiles((prev) => prev.filter((f) => !fileIds.includes(f.id)));
+        setSelectedTrashIds({});
+        await fetchAllFiles();
+        await fetchFiles(currentFolderId);
+      } else {
+        showToast("error", json.message || "Failed to delete selected items.");
+      }
+    } catch (err) {
+      showToast("error", "An error occurred while deleting selected items.");
+    } finally {
+      setIsBatchDeleting(false);
+      const deleteClearedRecord: Record<string, boolean> = {};
+      fileIds.forEach((id) => {
+        deleteClearedRecord[id] = false;
+      });
+      setDeletingIds((prev) => ({ ...prev, ...deleteClearedRecord }));
+    }
+  };
+
+  const handleBatchPermanentDelete = (fileIds: string[]) => {
+    if (fileIds.length === 0) return;
+    showConfirm({
+      title: "Permanently Delete Selected Items?",
+      message: `Warning: Permanently deleting these ${fileIds.length} items will permanently delete all contents inside any selected folders. This action is irreversible. Do you want to proceed?`,
+      confirmText: "Permanently Delete",
+      cancelText: "Cancel",
+      type: "danger",
+      onConfirm: () => executeBatchPermanentDelete(fileIds),
+    });
+  };
+
+  // Empty Trash (permanently deletes all currently soft-deleted items)
+  const handleEmptyTrash = () => {
+    const trashedFiles = allFiles.filter((f) => f.isDeleted);
+    if (trashedFiles.length === 0) return;
+    
+    const fileIds = trashedFiles.map((f) => f.id);
+    showConfirm({
+      title: "Empty Trash Bin?",
+      message: `Warning: This will permanently delete all ${trashedFiles.length} items currently in the trash bin, including all nested files and folders. This action is irreversible. Do you want to proceed?`,
+      confirmText: "Empty Trash",
+      cancelText: "Cancel",
+      type: "danger",
+      onConfirm: () => executeBatchPermanentDelete(fileIds),
+    });
+  };
+
   const handleShare = async (fileId: string) => {
     try {
       const response = await fetch(`/api/files/${fileId}`, {
@@ -1505,22 +1978,6 @@ function DashboardContent() {
     }
   };
 
-  if (loading) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
-        <LoadingSpinner size="lg" label="Restoring your secure cloud bridge..." />
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
-        <LoadingSpinner size="lg" label="Loading profile..." />
-      </div>
-    );
-  }
-
   // Active files (excludes files marked as isDeleted)
   const activeFiles = files.filter((f) => !f.isDeleted);
   const globalActiveFiles = allFiles.filter((f) => !f.isDeleted);
@@ -1569,7 +2026,7 @@ function DashboardContent() {
   const totalUsedPercent = Math.min(Math.round((totalStorage / limitBytes) * 100), 100);
 
   // Fallback chain for user display name
-  const userName = user.displayName || user.username || user.phoneNumber || "Aditya";
+  const userName = user ? (user.displayName || user.username || user.phoneNumber || "Aditya") : "Aditya";
 
   // Filtered files list selector by tab
   let visibleFiles: DBFile[] = [];
@@ -1582,7 +2039,7 @@ function DashboardContent() {
   } else if (tab === "shared") {
     visibleFiles = activeFiles.filter((f) => f.isShared);
   } else if (tab === "trash") {
-    visibleFiles = files.filter((f) => f.isDeleted);
+    visibleFiles = allFiles.filter((f) => f.isDeleted);
   } else if (tab === "folders") {
     if (selectedFolderCategory === "images") visibleFiles = imageFiles;
     else if (selectedFolderCategory === "documents") visibleFiles = documentFiles;
@@ -1592,9 +2049,69 @@ function DashboardContent() {
   }
 
   // Filter visible files: use semantic search results if search query is active (except in Trash tab)
-  const finalFilteredFiles = tab === "trash"
+  const baseFilteredFiles = tab === "trash"
     ? visibleFiles.filter((f) => f.fileName.toLowerCase().includes(searchTerm.toLowerCase()))
     : (searchTerm.trim() ? semanticSearchResults : visibleFiles);
+
+  const finalFilteredFiles = useMemo(() => {
+    let list = [...baseFilteredFiles];
+
+    if (tab === "my-files") {
+      // 1. Filter by type
+      if (filterType !== "all") {
+        list = list.filter((f) => {
+          if (f.mimeType === "folder") return false;
+          
+          if (filterType === "pdf") {
+            return (f.mimeType || "").toLowerCase().includes("pdf") || f.fileName.toLowerCase().endsWith(".pdf");
+          }
+          
+          const cat = classifyFile(f.mimeType, f.fileName);
+          if (filterType === "document") {
+            const isPdf = (f.mimeType || "").toLowerCase().includes("pdf") || f.fileName.toLowerCase().endsWith(".pdf");
+            return cat === "document" && !isPdf;
+          }
+          return cat === filterType;
+        });
+      }
+
+      // 2. Sort files/folders
+      list.sort((a, b) => {
+        if (sortBy === "newest") {
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        } else if (sortBy === "oldest") {
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        } else if (sortBy === "largest") {
+          const sizeA = a.mimeType === "folder" ? -1 : Number(a.fileSize || 0);
+          const sizeB = b.mimeType === "folder" ? -1 : Number(b.fileSize || 0);
+          return sizeB - sizeA;
+        } else if (sortBy === "smallest") {
+          const sizeA = a.mimeType === "folder" ? -1 : Number(a.fileSize || 0);
+          const sizeB = b.mimeType === "folder" ? -1 : Number(b.fileSize || 0);
+          return sizeA - sizeB;
+        }
+        return 0;
+      });
+    }
+
+    return list;
+  }, [baseFilteredFiles, sortBy, filterType, tab]);
+
+  if (loading) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
+        <LoadingSpinner size="lg" label="Restoring your secure cloud bridge..." />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
+        <LoadingSpinner size="lg" label="Loading profile..." />
+      </div>
+    );
+  }
 
   // Helper to determine if file is a viewer-supported image or video
   const isImageFile = (file: DBFile) => {
@@ -1695,10 +2212,27 @@ function DashboardContent() {
       );
     }
 
+    const isAllSelected = fileList.length > 0 && fileList.every((file) => selectedTrashIds[file.id]);
+
     return (
       <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
         <thead>
           <tr style={{ borderBottom: "1px solid var(--border-default)" }}>
+            <th style={{ padding: "0.75rem 0.5rem", width: "40px" }}>
+              <input
+                type="checkbox"
+                checked={isAllSelected}
+                onChange={() => handleToggleSelectAllTrash(fileList)}
+                style={{
+                  width: "16px",
+                  height: "16px",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  accentColor: "var(--color-primary, #6366f1)",
+                  verticalAlign: "middle"
+                }}
+              />
+            </th>
             <th style={{ padding: "0.75rem 0.5rem", fontSize: "0.75rem", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 600 }}>Name</th>
             <th style={{ padding: "0.75rem 0.5rem", fontSize: "0.75rem", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 600 }}>Size</th>
             <th style={{ padding: "0.75rem 0.5rem", fontSize: "0.75rem", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: 600, textAlign: "right" }}>Action</th>
@@ -1708,9 +2242,27 @@ function DashboardContent() {
           {fileList.map((file) => {
             const style = getFileStyle(file.mimeType, file.fileName);
             const isDeleting = deletingIds[file.id];
+            const isSelected = !!selectedTrashIds[file.id];
 
             return (
               <tr key={file.id} style={{ borderBottom: "1px solid var(--border-subtle)", opacity: isDeleting ? 0.5 : 1 }}>
+                {/* Checkbox */}
+                <td style={{ padding: "0.85rem 0.5rem", width: "40px" }}>
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => handleToggleSelectTrash(file.id)}
+                    disabled={isDeleting}
+                    style={{
+                      width: "16px",
+                      height: "16px",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      accentColor: "var(--color-primary, #6366f1)",
+                      verticalAlign: "middle"
+                    }}
+                  />
+                </td>
                 {/* Name */}
                 <td style={{ padding: "0.85rem 0.5rem", maxWidth: "240px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
@@ -1782,6 +2334,85 @@ function DashboardContent() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem", width: "100%" }}>
+      <style>{`
+        @keyframes merge-into-folder {
+          0% {
+            transform: scale(1);
+            opacity: 1;
+          }
+          50% {
+            transform: scale(0.6) translate(10px, 10px);
+            opacity: 0.5;
+          }
+          100% {
+            transform: scale(0);
+            opacity: 0;
+          }
+        }
+
+        @keyframes folder-scale-in {
+          0% {
+            transform: scale(0.3);
+            opacity: 0;
+          }
+          100% {
+            transform: scale(1);
+            opacity: 1;
+          }
+        }
+
+        @keyframes pulse-glow {
+          0% {
+            box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4);
+            border-color: rgba(245, 158, 11, 0.6);
+            transform: scale(1);
+          }
+          50% {
+            box-shadow: 0 0 0 10px rgba(245, 158, 11, 0);
+            border-color: rgba(245, 158, 11, 1);
+            transform: scale(1.03);
+          }
+          100% {
+            box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+            border-color: rgba(245, 158, 11, 0.6);
+            transform: scale(1);
+          }
+        }
+
+        .merge-animating {
+          animation: merge-into-folder 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+          pointer-events: none;
+        }
+
+        .scale-in-animating {
+          animation: folder-scale-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+        }
+
+        .pulse-glow-animating {
+          animation: pulse-glow 0.6s ease-out infinite;
+        }
+        
+        .dnd-draggable {
+          cursor: grab !important;
+          transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.2s ease !important;
+        }
+        .dnd-draggable:active {
+          cursor: grabbing !important;
+        }
+        
+        .dnd-dragged {
+          opacity: 0.4 !important;
+          transform: scale(0.96) !important;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
+        }
+        
+        .dnd-dragover {
+          border: 1.5px dashed #F59E0B !important;
+          background: rgba(245, 158, 11, 0.08) !important;
+          transform: scale(1.02) !important;
+          box-shadow: 0 8px 16px rgba(245, 158, 11, 0.15) !important;
+        }
+      `}</style>
       <input type="file" ref={fileInputRef} onChange={handleFileChange} style={{ display: "none" }} multiple />
       {/* Top Header Bar */}
       <DashboardHeader
@@ -2562,6 +3193,38 @@ function DashboardContent() {
               )}
             </div>
 
+            {tab === "trash" && (
+              <div style={{ display: "flex", alignItems: "center", gap: "0.65rem" }}>
+                <button
+                  disabled={finalFilteredFiles.length === 0 || isBatchDeleting}
+                  onClick={handleEmptyTrash}
+                  style={{
+                    background: "rgba(239, 68, 68, 0.12)",
+                    border: "1px solid rgba(239, 68, 68, 0.2)",
+                    color: "#EF4444",
+                    cursor: finalFilteredFiles.length === 0 ? "not-allowed" : "pointer",
+                    padding: "0.45rem 1rem",
+                    borderRadius: "8px",
+                    fontSize: "0.8rem",
+                    fontWeight: 700,
+                    fontFamily: "var(--font-outfit)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.45rem",
+                    transition: "all 0.2s ease-in-out",
+                    opacity: finalFilteredFiles.length === 0 ? 0.5 : 1,
+                  }}
+                  className="dropdown-item-hover"
+                  title="Empty Trash Bin Permanently"
+                >
+                  <svg style={{ width: "0.95rem", height: "0.95rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Empty Trash
+                </button>
+              </div>
+            )}
+
             {(tab === "dashboard" || tab === "my-files") && (
               <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexWrap: "wrap" }}>
                 {/* Segemented View Mode Controller */}
@@ -2666,6 +3329,198 @@ function DashboardContent() {
                   </div>
                 )}
 
+                {/* Filter & Sort Dropdown Component */}
+                {tab === "my-files" && (
+                  <div style={{ position: "relative" }}>
+                    <button
+                      onClick={() => setIsFilterDropdownOpen(!isFilterDropdownOpen)}
+                      style={{
+                        fontSize: "0.78rem",
+                        fontWeight: 700,
+                        color: filterType !== "all" || sortBy !== "newest"
+                          ? "#fff"
+                          : (darkMode ? "#FBBF24" : "#D97706"),
+                        background: filterType !== "all" || sortBy !== "newest"
+                          ? "linear-gradient(135deg, #F59E0B, #D97706)"
+                          : (darkMode ? "rgba(30, 41, 59, 0.45)" : "rgba(15, 23, 42, 0.05)"),
+                        border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
+                        borderRadius: "8px",
+                        padding: "0.45rem 0.85rem",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "0.35rem",
+                        cursor: "pointer",
+                        height: "32px",
+                        transition: "all 0.2s ease",
+                      }}
+                    >
+                      <svg style={{ width: "0.85rem", height: "0.85rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 3c2.755 0 5.455.477 8 1.4v2.6a1 1 0 0 1-.293.707L14 13.414V19a1 1 0 0 1-.553.894l-3 1.5A1 1 0 0 1 9 20.5V13.414L3.293 7.707A1 1 0 0 1 3 7V4.4A20.078 20.078 0 0 1 12 3Z" />
+                      </svg>
+                      
+                      {(filterType !== "all" || sortBy !== "newest") && (
+                        <span style={{
+                          background: "#fff",
+                          color: "#D97706",
+                          fontSize: "0.62rem",
+                          fontWeight: 900,
+                          borderRadius: "50%",
+                          width: "14px",
+                          height: "14px",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          marginLeft: "0.15rem",
+                        }}>
+                          !
+                        </span>
+                      )}
+                    </button>
+
+                    {isFilterDropdownOpen && (
+                      <>
+                        {/* Backdrop to close dropdown on click outside */}
+                        <div
+                          onClick={() => setIsFilterDropdownOpen(false)}
+                          style={{
+                            position: "fixed",
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            zIndex: 99,
+                            background: "transparent",
+                          }}
+                        />
+
+                        {/* Dropdown Card */}
+                        <div style={{
+                          position: "absolute",
+                          right: 0,
+                          top: "105%",
+                          width: "220px",
+                          background: darkMode ? "rgba(30, 41, 59, 0.95)" : "rgba(255, 255, 255, 0.98)",
+                          backdropFilter: "blur(16px)",
+                          border: darkMode ? "1px solid rgba(255, 255, 255, 0.15)" : "1px solid rgba(0, 0, 0, 0.08)",
+                          borderRadius: "12px",
+                          padding: "0.75rem",
+                          boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.15)",
+                          zIndex: 100,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "0.6rem",
+                        }}>
+                          {/* Sort By Section */}
+                          <div>
+                            <span style={{
+                              fontSize: "0.65rem",
+                              fontWeight: 800,
+                              color: darkMode ? "#94a3b8" : "#64748b",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.05em",
+                              display: "block",
+                              marginBottom: "0.3rem",
+                            }}>
+                              Sort By
+                            </span>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+                              {[
+                                { value: "newest", label: "Newest first" },
+                                { value: "oldest", label: "Oldest first" },
+                                { value: "largest", label: "Largest size" },
+                                { value: "smallest", label: "Smallest size" },
+                              ].map((option) => (
+                                <button
+                                  key={option.value}
+                                  onClick={() => {
+                                    setSortBy(option.value as any);
+                                    setIsFilterDropdownOpen(false);
+                                  }}
+                                  style={{
+                                    width: "100%",
+                                    textAlign: "left",
+                                    background: sortBy === option.value
+                                      ? "rgba(245, 158, 11, 0.15)"
+                                      : "transparent",
+                                    border: "none",
+                                    borderRadius: "6px",
+                                    padding: "0.35rem 0.55rem",
+                                    fontSize: "0.74rem",
+                                    fontWeight: sortBy === option.value ? 700 : 500,
+                                    color: sortBy === option.value
+                                      ? (darkMode ? "#FBBF24" : "#D97706")
+                                      : (darkMode ? "#cbd5e1" : "#334155"),
+                                    cursor: "pointer",
+                                    transition: "all 0.15s ease",
+                                  }}
+                                  className="dropdown-item-hover"
+                                >
+                                  {option.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div style={{ height: "1px", background: darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)" }} />
+
+                          {/* Filter By Section */}
+                          <div>
+                            <span style={{
+                              fontSize: "0.65rem",
+                              fontWeight: 800,
+                              color: darkMode ? "#94a3b8" : "#64748b",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.05em",
+                              display: "block",
+                              marginBottom: "0.3rem",
+                            }}>
+                              Filter By Type
+                            </span>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+                              {[
+                                { value: "all", label: "All files & folders" },
+                                { value: "document", label: "Documents" },
+                                { value: "image", label: "Images" },
+                                { value: "media", label: "Videos & Audio" },
+                                { value: "pdf", label: "PDFs" },
+                                { value: "archive", label: "Archives" },
+                              ].map((option) => (
+                                <button
+                                  key={option.value}
+                                  onClick={() => {
+                                    setFilterType(option.value as any);
+                                    setIsFilterDropdownOpen(false);
+                                  }}
+                                  style={{
+                                    width: "100%",
+                                    textAlign: "left",
+                                    background: filterType === option.value
+                                      ? "rgba(245, 158, 11, 0.15)"
+                                      : "transparent",
+                                    border: "none",
+                                    borderRadius: "6px",
+                                    padding: "0.35rem 0.55rem",
+                                    fontSize: "0.74rem",
+                                    fontWeight: filterType === option.value ? 700 : 500,
+                                    color: filterType === option.value
+                                      ? (darkMode ? "#FBBF24" : "#D97706")
+                                      : (darkMode ? "#cbd5e1" : "#334155"),
+                                    cursor: "pointer",
+                                    transition: "all 0.15s ease",
+                                  }}
+                                  className="dropdown-item-hover"
+                                >
+                                  {option.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
                 {/* Create Folder Trigger Button */}
                 <button
                   onClick={() => setIsNewFolderModalOpen(true)}
@@ -2734,190 +3589,256 @@ function DashboardContent() {
                   .map((folder) => (
                     <div
                       key={folder.id}
-                      onDoubleClick={() => handleEnterFolder(folder.id, folder.fileName)}
-                      onClick={() => handleEnterFolder(folder.id, folder.fileName)}
+                      draggable={tab === "my-files" && !isMultiSelectMode}
+                      onDragStart={(e) => handleDragStart(e, folder as any)}
+                      onDragEnd={handleDragEnd}
+                      onDragOver={(e) => handleDragOver(e, folder as any)}
+                      onDragLeave={handleDragLeave}
+                      onDrop={(e) => handleItemDrop(e, folder as any)}
+                      onDoubleClick={(e) => {
+                        if (isMultiSelectMode) {
+                          e.stopPropagation();
+                        } else {
+                          handleEnterFolder(folder.id, folder.fileName);
+                        }
+                      }}
+                      onClick={(e) => {
+                        if (isMultiSelectMode) {
+                          e.stopPropagation();
+                          handleToggleSelectActive(folder.id);
+                        } else {
+                          handleEnterFolder(folder.id, folder.fileName);
+                        }
+                      }}
                       style={{
-                        background: darkMode ? "rgba(30, 41, 59, 0.45)" : "rgba(255, 255, 255, 0.9)",
-                        backdropFilter: "blur(12px)",
-                        border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
+                        background: (isMultiSelectMode && selectedActiveIds[folder.id])
+                          ? (darkMode ? "rgba(245, 158, 11, 0.10)" : "rgba(245, 158, 11, 0.06)")
+                          : "transparent",
+                        border: (isMultiSelectMode && selectedActiveIds[folder.id])
+                          ? "1.5px solid rgba(245, 158, 11, 0.5)"
+                          : "1.5px solid transparent",
                         borderRadius: "12px",
-                        padding: "0.85rem 1rem",
+                        padding: "0.6rem 0.4rem 0.5rem",
                         display: "flex",
+                        flexDirection: "column",
                         alignItems: "center",
-                        gap: "0.75rem",
+                        gap: "0.3rem",
                         cursor: "pointer",
                         position: "relative",
                         transition: "all 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
-                        boxShadow: darkMode ? "none" : "0 4px 6px -1px rgba(0, 0, 0, 0.05)",
                       }}
-                      className="folder-card-hover"
+                      className={`folder-card-hover ${
+                        tab === "my-files" && !isMultiSelectMode ? "dnd-draggable" : ""
+                      } ${draggedItem?.id === folder.id ? "dnd-dragged" : ""} ${
+                        dragOverItem?.id === folder.id ? "dnd-dragover" : ""
+                      } ${
+                        mergingSourceId === folder.id ? "merge-animating" : ""
+                      } ${
+                        mergingTargetId === folder.id ? "pulse-glow-animating" : ""
+                      } ${
+                        newFolderScaleInId === folder.id ? "scale-in-animating" : ""
+                      }`}
                     >
+                      {/* Multi-select checkbox */}
+                      {isMultiSelectMode && (
+                        <input
+                          type="checkbox"
+                          checked={!!selectedActiveIds[folder.id]}
+                          onChange={() => handleToggleSelectActive(folder.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            position: "absolute",
+                            top: "0.35rem",
+                            left: "0.35rem",
+                            width: "16px",
+                            height: "16px",
+                            accentColor: "#F59E0B",
+                            cursor: "pointer",
+                            zIndex: 5,
+                          }}
+                        />
+                      )}
+
+                      {/* Actions: 3-dot menu + delete — top-right corner */}
                       <div
                         style={{
-                          width: "36px",
-                          height: "36px",
-                          borderRadius: "8px",
-                          background: darkMode 
-                            ? "linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(217, 119, 6, 0.05))" 
-                            : "linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(251, 191, 36, 0.22))",
+                          position: "absolute",
+                          top: "0.25rem",
+                          right: "0.25rem",
                           display: "flex",
                           alignItems: "center",
-                          justifyContent: "center",
+                          gap: "0.15rem",
+                          zIndex: 5,
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div style={{ position: "relative" }}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveMenuFileId(activeMenuFileId === folder.id ? null : folder.id);
+                            }}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: darkMode ? "#94a3b8" : "#64748b",
+                              cursor: "pointer",
+                              padding: "0.2rem",
+                              borderRadius: "4px",
+                              display: "flex",
+                              alignItems: "center",
+                            }}
+                            className="dropdown-item-hover"
+                          >
+                            <svg style={{ width: "0.85rem", height: "0.85rem" }} fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M12 10.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm0-6a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm0 12a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z" />
+                            </svg>
+                          </button>
+
+                          {activeMenuFileId === folder.id && (
+                            <div
+                              style={{
+                                position: "absolute",
+                                right: 0,
+                                top: "100%",
+                                background: darkMode ? "#1e293b" : "#ffffff",
+                                border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
+                                borderRadius: "8px",
+                                padding: "0.35rem",
+                                zIndex: 40,
+                                boxShadow: darkMode ? "0 10px 15px -3px rgba(0, 0, 0, 0.3)" : "0 10px 15px -3px rgba(15, 23, 42, 0.08)",
+                                minWidth: "110px",
+                              }}
+                            >
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setIsMultiSelectMode(true);
+                                  setSelectedActiveIds({ [folder.id]: true });
+                                  setActiveMenuFileId(null);
+                                }}
+                                style={{
+                                  width: "100%",
+                                  textAlign: "left",
+                                  background: "none",
+                                  border: "none",
+                                  color: darkMode ? "#ffffff" : "#0f172a",
+                                  fontSize: "0.74rem",
+                                  fontWeight: 700,
+                                  padding: "0.4rem 0.6rem",
+                                  borderRadius: "6px",
+                                  cursor: "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "0.35rem",
+                                  marginBottom: "0.25rem",
+                                }}
+                                className="dropdown-item-hover"
+                              >
+                                <svg style={{ width: "0.8rem", height: "0.8rem", color: darkMode ? "#cbd5e1" : "#475569" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                  <polyline points="9 11 12 14 22 4"/>
+                                </svg>
+                                Select
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setRenameModalFile(folder as any);
+                                  setRenameModalValue(folder.fileName);
+                                  setActiveMenuFileId(null);
+                                }}
+                                style={{
+                                  width: "100%",
+                                  textAlign: "left",
+                                  background: "none",
+                                  border: "none",
+                                  color: darkMode ? "#ffffff" : "#0f172a",
+                                  fontSize: "0.74rem",
+                                  fontWeight: 700,
+                                  padding: "0.4rem 0.6rem",
+                                  borderRadius: "6px",
+                                  cursor: "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "0.35rem",
+                                  marginBottom: "0.25rem",
+                                }}
+                                className="dropdown-item-hover"
+                              >
+                                <svg style={{ width: "0.8rem", height: "0.8rem", color: darkMode ? "#cbd5e1" : "#475569" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z" />
+                                </svg>
+                                Rename
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handlePermanentDelete(folder.id, folder.fileName);
+                                    setActiveMenuFileId(null);
+                                }}
+                                style={{
+                                  width: "100%",
+                                  textAlign: "left",
+                                  background: "none",
+                                  border: "none",
+                                  color: "#EF4444",
+                                  fontSize: "0.74rem",
+                                  fontWeight: 700,
+                                  padding: "0.4rem 0.6rem",
+                                  borderRadius: "6px",
+                                  cursor: "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "0.35rem",
+                                }}
+                                className="dropdown-item-hover"
+                              >
+                                <svg style={{ width: "0.8rem", height: "0.8rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                </svg>
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Bare folder icon — no wrapper, no background */}
+                      <svg
+                        style={{
+                          width: "3rem",
+                          height: "3rem",
                           color: darkMode ? "#FBBF24" : "#D97706",
                           flexShrink: 0,
+                          filter: "drop-shadow(0 2px 4px rgba(245, 158, 11, 0.18))",
+                          transition: "transform 0.2s ease",
                         }}
+                        fill="currentColor"
+                        viewBox="0 0 24 24"
                       >
-                        <svg style={{ width: "1.2rem", height: "1.2rem" }} fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M19.5 21a3 3 0 0 0 3-3v-4.5a3 3 0 0 0-3-3h-15a3 3 0 0 0-3 3V18a3 3 0 0 0 3 3h15ZM22.5 12V9.75a3 3 0 0 0-3-3h-7.164a3 3 0 0 1-2.122-.879L8.964 4.621A3 3 0 0 0 6.843 3.75H4.5a3 3 0 0 0-3 3v4.75h21Z" />
-                        </svg>
-                      </div>
+                        <path d="M19.5 21a3 3 0 0 0 3-3v-4.5a3 3 0 0 0-3-3h-15a3 3 0 0 0-3 3V18a3 3 0 0 0 3 3h15ZM22.5 12V9.75a3 3 0 0 0-3-3h-7.164a3 3 0 0 1-2.122-.879L8.964 4.621A3 3 0 0 0 6.843 3.75H4.5a3 3 0 0 0-3 3v4.75h21Z" />
+                      </svg>
 
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <p
-                          style={{
-                            fontSize: "0.82rem",
-                            fontWeight: 700,
-                            color: darkMode ? "#ffffff" : "#0f172a",
-                            margin: 0,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                            fontFamily: "var(--font-outfit)",
-                          }}
-                          title={folder.fileName}
-                        >
-                          {folder.fileName}
-                        </p>
-                        <span style={{ fontSize: "0.68rem", color: darkMode ? "#94a3b8" : "#64748b", fontWeight: 500 }}>
-                          Directory
-                        </span>
-                      </div>
-
-                      {/* Actions Ellipsis button */}
-                      <div
-                        style={{ position: "relative" }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveMenuFileId(activeMenuFileId === folder.id ? null : folder.id);
-                        }}
-                      >
-                        <button
-                          style={{
-                            background: "none",
-                            border: "none",
-                            color: darkMode ? "#94a3b8" : "#64748b",
-                            cursor: "pointer",
-                            padding: "0.25rem",
-                            borderRadius: "4px",
-                          }}
-                          className="dropdown-item-hover"
-                        >
-                          <svg style={{ width: "0.9rem", height: "0.9rem" }} fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M12 10.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm0-6a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm0 12a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z" />
-                          </svg>
-                        </button>
-
-                        {activeMenuFileId === folder.id && (
-                          <div
-                            style={{
-                              position: "absolute",
-                              right: 0,
-                              top: "100%",
-                              background: darkMode ? "#1e293b" : "#ffffff",
-                              border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
-                              borderRadius: "8px",
-                              padding: "0.35rem",
-                              zIndex: 40,
-                              boxShadow: darkMode ? "0 10px 15px -3px rgba(0, 0, 0, 0.3)" : "0 10px 15px -3px rgba(15, 23, 42, 0.08)",
-                              minWidth: "110px",
-                            }}
-                          >
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setRenameModalFile(folder as any);
-                                setRenameModalValue(folder.fileName);
-                                setActiveMenuFileId(null);
-                              }}
-                              style={{
-                                width: "100%",
-                                textAlign: "left",
-                                background: "none",
-                                border: "none",
-                                color: darkMode ? "#ffffff" : "#0f172a",
-                                fontSize: "0.74rem",
-                                fontWeight: 700,
-                                padding: "0.4rem 0.6rem",
-                                borderRadius: "6px",
-                                cursor: "pointer",
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "0.35rem",
-                                marginBottom: "0.25rem",
-                              }}
-                              className="dropdown-item-hover"
-                            >
-                              <svg style={{ width: "0.8rem", height: "0.8rem", color: darkMode ? "#cbd5e1" : "#475569" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z" />
-                              </svg>
-                              Rename
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                  e.stopPropagation();
-                                  handlePermanentDelete(folder.id, folder.fileName);
-                                  setActiveMenuFileId(null);
-                              }}
-                              style={{
-                                width: "100%",
-                                textAlign: "left",
-                                background: "none",
-                                border: "none",
-                                color: "#EF4444",
-                                fontSize: "0.74rem",
-                                fontWeight: 700,
-                                padding: "0.4rem 0.6rem",
-                                borderRadius: "6px",
-                                cursor: "pointer",
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "0.35rem",
-                              }}
-                              className="dropdown-item-hover"
-                            >
-                              <svg style={{ width: "0.8rem", height: "0.8rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                              </svg>
-                              Delete
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                      {/* Direct Delete button */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleMoveToTrash(folder);
-                        }}
+                      {/* Folder name below */}
+                      <p
                         style={{
-                          background: "none",
-                          border: "none",
-                          color: "#EF4444",
-                          cursor: "pointer",
-                          padding: "0.25rem",
-                          borderRadius: "4px",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
+                          fontSize: "0.78rem",
+                          fontWeight: 700,
+                          color: darkMode ? "#ffffff" : "#0f172a",
+                          margin: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          maxWidth: "100%",
+                          textAlign: "center",
+                          fontFamily: "var(--font-outfit)",
                         }}
-                        className="dropdown-item-hover"
-                        title="Delete Folder"
+                        title={folder.fileName}
                       >
-                        <svg style={{ width: "0.95rem", height: "0.95rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                        </svg>
-                      </button>
+                        {folder.fileName}
+                      </p>
                     </div>
                   ))}
               </div>
@@ -2972,12 +3893,22 @@ function DashboardContent() {
                       return (
                         <div
                           key={file.id}
+                          draggable={tab === "my-files" && !isMultiSelectMode}
+                          onDragStart={(e) => handleDragStart(e, file as any)}
+                          onDragEnd={handleDragEnd}
+                          onDragOver={(e) => handleDragOver(e, file as any)}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleItemDrop(e, file as any)}
                           style={{
-                            background: "transparent",
+                            background: (isMultiSelectMode && selectedActiveIds[file.id])
+                              ? (darkMode ? "rgba(245, 158, 11, 0.12)" : "rgba(245, 158, 11, 0.06)")
+                              : "transparent",
                             backdropFilter: "none",
-                            border: "none",
+                            border: (isMultiSelectMode && selectedActiveIds[file.id])
+                              ? "1px solid #F59E0B"
+                              : "none",
                             borderRadius: "14px",
-                            padding: 0,
+                            padding: "0.25rem",
                             display: "flex",
                             flexDirection: "column",
                             gap: "0.5rem",
@@ -2988,11 +3919,24 @@ function DashboardContent() {
                             zIndex: activeMenuFileId === file.id ? 50 : 1,
                             boxShadow: "none",
                           }}
-                          className="folder-card-hover"
+                          className={`folder-card-hover ${
+                            tab === "my-files" && !isMultiSelectMode ? "dnd-draggable" : ""
+                          } ${draggedItem?.id === file.id ? "dnd-dragged" : ""} ${
+                            dragOverItem?.id === file.id ? "dnd-dragover" : ""
+                          } ${
+                            mergingSourceId === file.id ? "merge-animating" : ""
+                          } ${
+                            mergingTargetId === file.id ? "pulse-glow-animating" : ""
+                          }`}
                           onMouseEnter={() => setHoveredFileId(file.id)}
                           onMouseLeave={() => setHoveredFileId(null)}
-                          onClick={() => {
-                            setActiveDocumentViewerFileId(file.id);
+                          onClick={(e) => {
+                            if (isMultiSelectMode) {
+                              e.stopPropagation();
+                              handleToggleSelectActive(file.id);
+                            } else {
+                              setActiveDocumentViewerFileId(file.id);
+                            }
                           }}
                         >
                           {/* Image/Video Preview or Icon slot */}
@@ -3042,36 +3986,72 @@ function DashboardContent() {
                               </div>
                             )}
 
-                            {/* Floating Star button (Visible on Hover or if Starred) */}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleToggleFavorite(file.id);
-                              }}
-                              style={{
-                                position: "absolute",
-                                top: "0.4rem",
-                                left: "0.4rem",
-                                background: darkMode ? "rgba(15, 23, 42, 0.75)" : "rgba(255, 255, 255, 0.85)",
-                                border: darkMode ? "none" : "1px solid rgba(0, 0, 0, 0.08)",
-                                cursor: "pointer",
-                                padding: "0.3rem",
-                                borderRadius: "50%",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                zIndex: 10,
-                                backdropFilter: "blur(4px)",
-                                opacity: (hoveredFileId === file.id || isStarred) ? 1 : 0,
-                                transform: (hoveredFileId === file.id || isStarred) ? "scale(1)" : "scale(0.85)",
-                                transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
-                              }}
-                              title={isStarred ? "Starred" : "Star"}
-                            >
-                              <svg style={{ width: "0.85rem", height: "0.85rem", color: isStarred ? "#FBBF24" : (darkMode ? "#94A3B8" : "#64748B") }} viewBox="0 0 24 24" fill={isStarred ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2.5">
-                                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-                              </svg>
-                            </button>
+                            {isMultiSelectMode ? (
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleToggleSelectActive(file.id);
+                                }}
+                                style={{
+                                  position: "absolute",
+                                  top: "0.4rem",
+                                  left: "0.4rem",
+                                  background: selectedActiveIds[file.id]
+                                    ? "#F59E0B"
+                                    : (darkMode ? "rgba(15, 23, 42, 0.75)" : "rgba(255, 255, 255, 0.85)"),
+                                  border: selectedActiveIds[file.id]
+                                    ? "none"
+                                    : (darkMode ? "1px solid rgba(255, 255, 255, 0.2)" : "1px solid rgba(0, 0, 0, 0.15)"),
+                                  cursor: "pointer",
+                                  width: "22px",
+                                  height: "22px",
+                                  borderRadius: "50%",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  zIndex: 10,
+                                  backdropFilter: "blur(4px)",
+                                  boxShadow: "0 2px 6px rgba(0, 0, 0, 0.15)",
+                                  transition: "all 0.2s ease"
+                                }}
+                              >
+                                {selectedActiveIds[file.id] && (
+                                  <svg style={{ width: "0.75rem", height: "0.75rem", color: "#ffffff" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="20 6 9 17 4 12" />
+                                  </svg>
+                                )}
+                              </div>
+                            ) : (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleToggleFavorite(file.id);
+                                }}
+                                style={{
+                                  position: "absolute",
+                                  top: "0.4rem",
+                                  left: "0.4rem",
+                                  background: darkMode ? "rgba(15, 23, 42, 0.75)" : "rgba(255, 255, 255, 0.85)",
+                                  border: darkMode ? "none" : "1px solid rgba(0, 0, 0, 0.08)",
+                                  cursor: "pointer",
+                                  padding: "0.3rem",
+                                  borderRadius: "50%",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  zIndex: 10,
+                                  backdropFilter: "blur(4px)",
+                                  opacity: (hoveredFileId === file.id || isStarred) ? 1 : 0,
+                                  transform: (hoveredFileId === file.id || isStarred) ? "scale(1)" : "scale(0.85)",
+                                  transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
+                                }}
+                                title={isStarred ? "Starred" : "Star"}
+                              >
+                                <svg style={{ width: "0.85rem", height: "0.85rem", color: isStarred ? "#FBBF24" : (darkMode ? "#94A3B8" : "#64748B") }} viewBox="0 0 24 24" fill={isStarred ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2.5">
+                                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                                </svg>
+                              </button>
+                            )}
 
                             {/* Floating Ellipsis Menu button */}
                             <div
@@ -3121,6 +4101,38 @@ function DashboardContent() {
                                 minWidth: "120px",
                               }}
                             >
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setIsMultiSelectMode(true);
+                                  setSelectedActiveIds({ [file.id]: true });
+                                  setActiveMenuFileId(null);
+                                }}
+                                style={{
+                                  width: "100%",
+                                  textAlign: "left",
+                                  background: "none",
+                                  border: "none",
+                                  color: darkMode ? "#ffffff" : "#0f172a",
+                                  fontSize: "0.74rem",
+                                  fontWeight: 700,
+                                  padding: "0.4rem 0.6rem",
+                                  borderRadius: "6px",
+                                  cursor: "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "0.35rem",
+                                  marginBottom: "0.25rem",
+                                }}
+                                className="dropdown-item-hover"
+                              >
+                                <svg style={{ width: "0.8rem", height: "0.8rem", color: darkMode ? "#cbd5e1" : "#475569" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                  <polyline points="9 11 12 14 22 4"/>
+                                </svg>
+                                <span>Select</span>
+                              </button>
+
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -3364,6 +4376,22 @@ function DashboardContent() {
                     onFileClick={(file) => {
                       setActiveDocumentViewerFileId(file.id);
                     }}
+                    isMultiSelectMode={isMultiSelectMode}
+                    selectedActiveIds={selectedActiveIds}
+                    handleToggleSelectActive={handleToggleSelectActive}
+                    handleToggleSelectAllActive={handleToggleSelectAllActive}
+                    onSelectClick={(file) => {
+                      setIsMultiSelectMode(true);
+                      setSelectedActiveIds({ [file.id]: true });
+                    }}
+                    tab={tab}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleItemDrop}
+                    draggedItem={draggedItem}
+                    dragOverItem={dragOverItem}
                   />
                 )}
               </div>
@@ -3562,6 +4590,394 @@ function DashboardContent() {
         darkMode={darkMode}
         type={confirmModal.type}
       />
+
+      {/* Premium Glassmorphic Folder Creation Merge Modal */}
+      {mergeModal?.isOpen && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background: "rgba(0, 0, 0, 0.45)",
+            backdropFilter: "blur(8px)",
+            WebkitBackdropFilter: "blur(8px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+            animation: "fade-in 0.2s ease-out",
+          }}
+        >
+          <div
+            className="glass-card"
+            style={{
+              width: "420px",
+              padding: "1.8rem",
+              background: darkMode ? "rgba(30, 41, 59, 0.75)" : "rgba(255, 255, 255, 0.85)",
+              border: darkMode ? "1px solid rgba(255, 255, 255, 0.12)" : "1px solid rgba(0, 0, 0, 0.08)",
+              borderRadius: "16px",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.15)",
+              animation: "scale-in 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
+            }}
+          >
+            <h3
+              style={{
+                fontSize: "1.1rem",
+                fontWeight: 800,
+                color: darkMode ? "#ffffff" : "#0f172a",
+                marginBottom: "0.5rem",
+                fontFamily: "var(--font-outfit)",
+              }}
+            >
+              Merge Files into New Folder
+            </h3>
+            <p
+              style={{
+                fontSize: "0.78rem",
+                color: darkMode ? "#94a3b8" : "#64748b",
+                marginBottom: "1.2rem",
+                lineHeight: "1.4",
+              }}
+            >
+              You are merging <strong>{mergeModal.fileA.fileName}</strong> and <strong>{mergeModal.fileB.fileName}</strong>. Enter a folder name below to group them.
+            </p>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleMergeCreateFolder(mergeModal.folderName);
+              }}
+            >
+              <input
+                type="text"
+                autoFocus
+                placeholder="Folder name"
+                value={mergeModal.folderName}
+                onChange={(e) =>
+                  setMergeModal((prev) =>
+                    prev ? { ...prev, folderName: e.target.value } : null
+                  )
+                }
+                style={{
+                  width: "100%",
+                  padding: "0.65rem 0.85rem",
+                  fontSize: "0.85rem",
+                  borderRadius: "10px",
+                  border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.12)",
+                  background: darkMode ? "rgba(15, 23, 42, 0.6)" : "#ffffff",
+                  color: darkMode ? "#ffffff" : "#000000",
+                  outline: "none",
+                  marginBottom: "1.5rem",
+                  fontFamily: "var(--font-outfit)",
+                  transition: "border-color 0.15s ease",
+                }}
+              />
+
+              <div style={{ display: "flex", justifyContent: "end", gap: "0.75rem" }}>
+                <button
+                  type="button"
+                  onClick={() => setMergeModal(null)}
+                  style={{
+                    fontSize: "0.78rem",
+                    fontWeight: 700,
+                    color: darkMode ? "#94a3b8" : "#64748b",
+                    background: "transparent",
+                    border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
+                    borderRadius: "8px",
+                    padding: "0.45rem 1rem",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!mergeModal.folderName.trim()}
+                  style={{
+                    fontSize: "0.78rem",
+                    fontWeight: 700,
+                    color: "#fff",
+                    background: "linear-gradient(135deg, #F59E0B, #D97706)",
+                    border: "none",
+                    borderRadius: "8px",
+                    padding: "0.45rem 1rem",
+                    cursor: "pointer",
+                    opacity: !mergeModal.folderName.trim() ? 0.6 : 1,
+                  }}
+                >
+                  Create & Merge
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Centering Wrapper for Premium Glassmorphic Floating Batch Action Bar for Active Files */}
+      {isMultiSelectMode && selectedActiveIdsArray.length > 0 && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "2rem",
+            left: 0,
+            width: "100%",
+            display: "flex",
+            justifyContent: "center",
+            pointerEvents: "none",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              pointerEvents: "auto",
+              background: darkMode ? "rgba(15, 23, 42, 0.85)" : "rgba(255, 255, 255, 0.85)",
+              backdropFilter: "blur(12px)",
+              WebkitBackdropFilter: "blur(12px)",
+              border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(15, 23, 42, 0.1)",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)",
+              borderRadius: "16px",
+              padding: "0.75rem 1.25rem",
+              display: "flex",
+              alignItems: "center",
+              gap: "1.5rem",
+              animation: "slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+            }}
+          >
+            {/* Selected Count */}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+              <div
+                style={{
+                  background: "#F59E0B",
+                  color: "#ffffff",
+                  width: "24px",
+                  height: "24px",
+                  borderRadius: "50%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "0.75rem",
+                  fontWeight: 800,
+                }}
+              >
+                {selectedActiveIdsArray.length}
+              </div>
+              <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text-primary)" }}>
+                selected
+              </span>
+            </div>
+
+            {/* Divider */}
+            <div style={{ width: "1px", height: "24px", background: "var(--border-default)" }} />
+
+            {/* Action Buttons */}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+              {/* Move to Trash */}
+              <button
+                onClick={() => handleBatchMoveToTrash(selectedActiveIdsArray)}
+                disabled={isBatchActiveDeleting}
+                style={{
+                  background: "rgba(245, 158, 11, 0.12)",
+                  border: "1px solid rgba(245, 158, 11, 0.2)",
+                  color: "#F59E0B",
+                  cursor: "pointer",
+                  padding: "0.45rem 1rem",
+                  borderRadius: "8px",
+                  fontSize: "0.8rem",
+                  fontWeight: 700,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.4rem",
+                  transition: "all 0.2s ease",
+                }}
+              >
+                {isBatchActiveDeleting ? (
+                  <span>⏳ Moving to Trash...</span>
+                ) : (
+                  <>
+                    <svg style={{ width: "0.95rem", height: "0.95rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Move to Trash
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Cancel Selection */}
+            <button
+              onClick={() => {
+                setSelectedActiveIds({});
+                setIsMultiSelectMode(false);
+              }}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "var(--text-muted)",
+                padding: "0.25rem",
+                borderRadius: "50%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                marginLeft: "0.5rem",
+              }}
+              title="Cancel Selection"
+            >
+              <svg style={{ width: "1.1rem", height: "1.1rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Centering Wrapper for Premium Glassmorphic Floating Batch Action Bar */}
+      {tab === "trash" && selectedTrashIdsArray.length > 0 && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "2rem",
+            left: 0,
+            width: "100%",
+            display: "flex",
+            justifyContent: "center",
+            pointerEvents: "none",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              pointerEvents: "auto",
+              background: darkMode ? "rgba(15, 23, 42, 0.85)" : "rgba(255, 255, 255, 0.85)",
+              backdropFilter: "blur(12px)",
+              WebkitBackdropFilter: "blur(12px)",
+              border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(15, 23, 42, 0.1)",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)",
+              borderRadius: "16px",
+              padding: "0.75rem 1.25rem",
+              display: "flex",
+              alignItems: "center",
+              gap: "1.5rem",
+              animation: "slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+            }}
+          >
+            {/* Selected Count */}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+              <div
+                style={{
+                  background: "var(--color-primary, #6366f1)",
+                  color: "#ffffff",
+                  width: "24px",
+                  height: "24px",
+                  borderRadius: "50%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "0.75rem",
+                  fontWeight: 800,
+                }}
+              >
+                {selectedTrashIdsArray.length}
+              </div>
+              <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text-primary)" }}>
+                selected
+              </span>
+            </div>
+
+            {/* Divider */}
+            <div style={{ width: "1px", height: "24px", background: "var(--border-default)" }} />
+
+            {/* Action Buttons */}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+              {/* Restore Selected */}
+              <button
+                onClick={() => handleBatchRestore(selectedTrashIdsArray)}
+                disabled={isBatchRestoring}
+                style={{
+                  background: darkMode ? "rgba(255, 255, 255, 0.08)" : "rgba(15, 23, 42, 0.05)",
+                  border: darkMode ? "1px solid rgba(255, 255, 255, 0.05)" : "1px solid rgba(15, 23, 42, 0.05)",
+                  color: "var(--text-primary)",
+                  cursor: "pointer",
+                  padding: "0.45rem 1rem",
+                  borderRadius: "8px",
+                  fontSize: "0.8rem",
+                  fontWeight: 700,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.4rem",
+                  transition: "all 0.2s ease",
+                }}
+              >
+                {isBatchRestoring ? (
+                  <span>⏳ Restoring...</span>
+                ) : (
+                  <>
+                    <svg style={{ width: "0.95rem", height: "0.95rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+                    </svg>
+                    Restore Selected
+                  </>
+                )}
+              </button>
+
+              {/* Delete Selected */}
+              <button
+                onClick={() => handleBatchPermanentDelete(selectedTrashIdsArray)}
+                disabled={isBatchDeleting}
+                style={{
+                  background: "rgba(239, 68, 68, 0.12)",
+                  border: "1px solid rgba(239, 68, 68, 0.2)",
+                  color: "#EF4444",
+                  cursor: "pointer",
+                  padding: "0.45rem 1rem",
+                  borderRadius: "8px",
+                  fontSize: "0.8rem",
+                  fontWeight: 700,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.4rem",
+                  transition: "all 0.2s ease",
+                }}
+              >
+                {isBatchDeleting ? (
+                  <span>⏳ Deleting...</span>
+                ) : (
+                  <>
+                    <svg style={{ width: "0.95rem", height: "0.95rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Delete Permanently
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Deselect All */}
+            <button
+              onClick={() => setSelectedTrashIds({})}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "var(--text-muted)",
+                padding: "0.25rem",
+                borderRadius: "50%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                marginLeft: "0.5rem",
+              }}
+              title="Clear Selection"
+            >
+              <svg style={{ width: "1.1rem", height: "1.1rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Premium File Details Modal */}
       {selectedDetailsFile && (

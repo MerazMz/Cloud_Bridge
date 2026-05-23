@@ -734,3 +734,32 @@ export async function deleteFileFromTelegram(
 
   log.info("Message deleted successfully from Telegram channel", { messageId });
 }
+
+/**
+ * Delete multiple file messages from a user's storage channel.
+ */
+export async function deleteMultipleFilesFromTelegram(
+  client: TelegramClient,
+  channelId: bigint,
+  accessHash: string,
+  messageIds: number[]
+): Promise<void> {
+  if (messageIds.length === 0) return;
+
+  const channelPeer = new Api.InputPeerChannel({
+    channelId: bigInt(channelId.toString()),
+    accessHash: bigInt(accessHash),
+  });
+
+  log.info("Deleting multiple messages from Telegram channel", { count: messageIds.length });
+
+  await client.invoke(
+    new Api.channels.DeleteMessages({
+      channel: channelPeer,
+      id: messageIds,
+    })
+  );
+
+  log.info("Messages deleted successfully from Telegram channel", { count: messageIds.length });
+}
+

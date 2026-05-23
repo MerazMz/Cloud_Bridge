@@ -11,6 +11,7 @@ export interface DBFile {
   isShared?: boolean;
   createdAt: string;
   similarity?: number;
+  parentId?: string | null;
 }
 
 export interface SemanticSearchResponse {
