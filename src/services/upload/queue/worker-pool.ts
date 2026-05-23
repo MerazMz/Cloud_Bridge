@@ -7,73 +7,12 @@ import { prisma } from "@/lib/prisma";
 import { Api } from "telegram";
 import bigInt from "big-integer";
 import { createLogger } from "@/lib/logger";
-// @ts-ignore
-import ffmpegPath from "ffmpeg-static";
-import { execFile } from "child_process";
-import { promisify } from "util";
 import { promises as fs } from "fs";
 import path from "path";
 import { SemanticSearchService } from "@/services/semantic-search/semantic-search.service";
 
 const log = createLogger("UploadWorkerPool");
-const execFilePromise = promisify(execFile);
 
-async function compressVideoFile(inputPath: string): Promise<{ outputPath: string; finalSize: number }> {
-  const outputPath = inputPath.replace("_compress_", "_compressed_");
-  
-  // Resolve ffmpeg binary path safely handling any Webpack CJS/ESM double default wrapping
-  let resolvedFfmpegPath: any = null;
-  try {
-    resolvedFfmpegPath = require("ffmpeg-static");
-  } catch {
-    resolvedFfmpegPath = ffmpegPath;
-  }
-
-  let finalFfmpegPath = "";
-  if (typeof resolvedFfmpegPath === "string") {
-    finalFfmpegPath = resolvedFfmpegPath;
-  } else if (resolvedFfmpegPath && typeof resolvedFfmpegPath === "object") {
-    if (typeof resolvedFfmpegPath.default === "string") {
-      finalFfmpegPath = resolvedFfmpegPath.default;
-    } else if (resolvedFfmpegPath.default && typeof resolvedFfmpegPath.default.default === "string") {
-      finalFfmpegPath = resolvedFfmpegPath.default.default;
-    }
-  }
-
-  if (!finalFfmpegPath) {
-    log.error("Failed to resolve valid FFmpeg static path", { rawValue: resolvedFfmpegPath });
-    throw new Error("FFmpeg static binary path could not be resolved.");
-  }
-
-  log.info("Running video compression using resolved FFmpeg static binary", {
-    binaryPath: finalFfmpegPath,
-    input: inputPath,
-    output: outputPath
-  });
-
-  // Run FFmpeg to compress the video. CRF 23 provides excellent size reduction with zero visible loss.
-  // -preset medium provides a fast encoding speed with good compression. Preserves original audio quality.
-  await execFilePromise(finalFfmpegPath, [
-    "-i", inputPath,
-    "-vcodec", "libx264",
-    "-crf", "23",
-    "-preset", "medium",
-    "-acodec", "copy",
-    "-y",
-    outputPath
-  ]);
-
-  // Read the compressed file size
-  const stat = await fs.stat(outputPath);
-  const finalSize = stat.size;
-
-  // Safely delete the original uncompressed file to preserve disk space
-  try {
-    await fs.unlink(inputPath);
-  } catch {}
-
-  return { outputPath, finalSize };
-}
 
 class UploadWorkerPool {
   private activeJobs = 0;
@@ -198,77 +137,8 @@ class UploadWorkerPool {
         accessHash: bigInt(user.storageChannelAccessHash),
       });
 
-      // 2.5 Optional Video Compression stage
-      let uploadFilePath = job.tempFilePath;
-      let uploadFileSize = Number(job.fileSize);
-      const isVideo = job.fileName.toLowerCase().match(/\.(mp4|mov|webm|mkv|avi)$/i);
-      const hasCompressMarker = path.basename(job.tempFilePath).includes("_compress_");
-
-      if (isVideo && hasCompressMarker) {
-        log.info("Compressing video file to optimize size...", { jobId: job.id, file: job.fileName });
-        
-        // Update progress state in DB to let the user know we are compressing
-        await prisma.uploadJob.update({
-          where: { id: job.id },
-          data: {
-            errorMessage: "Compressing video...", // Reuse errorMessage temporarily as status description
-          },
-        });
-        
-        // Broadcast custom "compressing" status to SSE subscribers
-        await UploadJobQueue.updateJobProgress(job.id, 0, 0, "Compressing...", "Calculating...");
-
-        try {
-          const { outputPath, finalSize } = await compressVideoFile(job.tempFilePath);
-          
-          // Double-check if the job got cancelled during the compression time window
-          const checkCancelledJob = await prisma.uploadJob.findUnique({
-            where: { id: job.id },
-            select: { status: true },
-          });
-
-          if (checkCancelledJob && checkCancelledJob.status === "cancelled") {
-            log.info("Job was cancelled during compression, cleaning up output file.", { jobId: job.id });
-            try {
-              await fs.unlink(outputPath);
-            } catch {}
-            throw new Error("Upload cancelled");
-          }
-
-          uploadFilePath = outputPath;
-          uploadFileSize = finalSize;
-
-          // Update the job record in database with the new compressed size!
-          await prisma.uploadJob.update({
-            where: { id: job.id },
-            data: {
-              fileSize: finalSize,
-              errorMessage: null, // Clear compression status text
-            },
-          });
-          
-          log.info("Video compression completed successfully", {
-            jobId: job.id,
-            originalSize: job.fileSize,
-            compressedSize: finalSize,
-            savingPercent: `${Math.round((1 - finalSize / Number(job.fileSize)) * 100)}%`
-          });
-        } catch (compressErr: any) {
-          if (compressErr.message === "Upload cancelled") {
-            throw compressErr;
-          }
-          log.error("Video compression failed, falling back to original quality raw file", {
-            jobId: job.id,
-            error: compressErr.message,
-            stack: compressErr.stack
-          });
-          // Restore errorMessage text if it was set
-          await prisma.uploadJob.update({
-            where: { id: job.id },
-            data: { errorMessage: null },
-          });
-        }
-      }
+      const uploadFilePath = job.tempFilePath;
+      const uploadFileSize = Number(job.fileSize);
 
       log.debug("Uploading stream with concurrent sliding-window workers", {
         jobId: job.id,

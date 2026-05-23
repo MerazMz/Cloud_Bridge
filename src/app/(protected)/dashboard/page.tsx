@@ -63,26 +63,7 @@ function DashboardContent() {
   const [darkMode, setDarkMode] = useState(false);
   const [deletingIds, setDeletingIds] = useState<Record<string, boolean>>({});
   const [downloadingIds, setDownloadingIds] = useState<Record<string, boolean>>({});
-  const [compressVideo, setCompressVideo] = useState<boolean>(false);
 
-  // Load video compression preference from localStorage on mount
-  useEffect(() => {
-    const savedCompress = localStorage.getItem("cloudbridge_compress_video");
-    if (savedCompress !== null) {
-      setCompressVideo(savedCompress === "true");
-    }
-  }, []);
-
-  const handleToggleCompressVideo = (val: boolean) => {
-    setCompressVideo(val);
-    localStorage.setItem("cloudbridge_compress_video", val ? "true" : "false");
-    showToast("success", `Video compression turned ${val ? "ON" : "OFF"}.`);
-  };
-
-  const compressVideoRef = useRef(compressVideo);
-  useEffect(() => {
-    compressVideoRef.current = compressVideo;
-  }, [compressVideo]);
   const [allFiles, setAllFiles] = useState<DBFile[]>([]);
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -387,6 +368,7 @@ function DashboardContent() {
 
   // Initialize theme and local storage states
   useEffect(() => {
+    let observer: MutationObserver | undefined;
     if (typeof window !== "undefined") {
       const savedTheme = localStorage.getItem("theme");
       if (savedTheme === "dark") {
@@ -399,6 +381,15 @@ function DashboardContent() {
         const hasDarkClass = document.documentElement.classList.contains("dark");
         setDarkMode(hasDarkClass);
       }
+
+      // Listen to class changes on documentElement to stay synchronized
+      observer = new MutationObserver(() => {
+        setDarkMode(document.documentElement.classList.contains("dark"));
+      });
+      observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["class"],
+      });
 
       // Load favorites
       try {
@@ -431,6 +422,12 @@ function DashboardContent() {
         }
       } catch {}
     }
+
+    return () => {
+      if (observer) {
+        observer.disconnect();
+      }
+    };
   }, []);
 
   const toggleDarkMode = () => {
@@ -706,9 +703,7 @@ function DashboardContent() {
       if (itemParentId) {
         headers["x-parent-id"] = itemParentId;
       }
-      if (compressVideoRef.current) {
-        headers["x-compress-video"] = "true";
-      }
+
 
       const responseData = await uploadFileWithXhr({
         url: "/api/files/upload",
@@ -884,9 +879,6 @@ function DashboardContent() {
       formData.append("file", file);
 
       const headers: Record<string, string> = {};
-      if (compressVideoRef.current) {
-        headers["x-compress-video"] = "true";
-      }
 
       const responseData = await uploadFileWithXhr({
         url: "/api/files/upload",
@@ -1461,6 +1453,25 @@ function DashboardContent() {
       );
     }
 
+    // Specific custom image branding for Audio files
+    if (
+      nameLower.endsWith(".mp3") ||
+      nameLower.endsWith(".wav") ||
+      nameLower.endsWith(".ogg") ||
+      nameLower.endsWith(".m4a") ||
+      nameLower.endsWith(".aac") ||
+      nameLower.endsWith(".flac") ||
+      mimeLower.startsWith("audio/")
+    ) {
+      return (
+        <img
+          src="/audio.png"
+          alt="Audio"
+          style={{ width: "1.25rem", height: "1.25rem", objectFit: "contain", display: "block" }}
+        />
+      );
+    }
+
     switch (category) {
       case "image":
         return (
@@ -1796,20 +1807,18 @@ function DashboardContent() {
       />
 
       {/* Welcome & Cover Banner */}
-      {tab !== "settings" && (
-        <WelcomeBanner
-          userName={userName}
-          tab={tab}
-          triggerFileInput={triggerFileInput}
-          isUploading={isUploading}
-          showBanner={showBanner}
-          isBannerVisible={isBannerVisible}
-          handleCloseBanner={handleCloseBanner}
-          onCreateFolderClick={() => setIsNewFolderModalOpen(true)}
-          onSyncClick={handleSyncSemanticSearch}
-          isSyncing={isSyncing}
-        />
-      )}
+      <WelcomeBanner
+        userName={userName}
+        tab={tab}
+        triggerFileInput={triggerFileInput}
+        isUploading={isUploading}
+        showBanner={showBanner}
+        isBannerVisible={isBannerVisible}
+        handleCloseBanner={handleCloseBanner}
+        onCreateFolderClick={() => setIsNewFolderModalOpen(true)}
+        onSyncClick={handleSyncSemanticSearch}
+        isSyncing={isSyncing}
+      />
 
       {/* Conditional Rendering Based on Tabs */}
       {tab === "dashboard" && (
@@ -2034,111 +2043,7 @@ function DashboardContent() {
         </section>
       )}
 
-      {/* Settings Tab Panel */}
-      {tab === "settings" && (
-        <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: "1.5rem", width: "100%", maxWidth: "800px", margin: "0 auto", marginTop: "1rem" }}>
-          {/* Header Description */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", marginBottom: "0.5rem" }}>
-            <h2 style={{ fontSize: "1.4rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.03em", margin: 0 }}>
-              Portal Preferences
-            </h2>
-            <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", fontWeight: 500, margin: 0 }}>
-              Customize your security, upload, and media optimization parameters.
-            </p>
-          </div>
 
-          {/* Section: Upload Settings */}
-          <div
-            className="glass-card"
-            style={{
-              padding: "1.5rem",
-              borderRadius: "16px",
-              border: "1px solid var(--border-default)",
-              background: "var(--bg-card)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "1.25rem",
-              boxShadow: "var(--glass-shadow)"
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", borderBottom: "1px solid var(--border-subtle)", paddingBottom: "0.75rem" }}>
-              <div style={{ fontSize: "1.25rem" }}>⚙️</div>
-              <h3 style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text-primary)", margin: 0, letterSpacing: "-0.015em" }}>
-                Upload & Optimization
-              </h3>
-            </div>
-
-            {/* Optimization Toggle Row */}
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1.5rem" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", flex: 1 }}>
-                <span style={{ fontSize: "0.88rem", fontWeight: 700, color: "var(--text-primary)", letterSpacing: "-0.01em" }}>
-                  Compress video before uploading
-                </span>
-                <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 500, lineHeight: "1.45" }}>
-                  When enabled, CloudBridge will execute background hardware-accelerated video video compression (H.264 / Constant Rate Factor 23) upon server ingestion. This reduces sizes by up to 80% and accelerates transfer times, preserving original visual detail and copy-preserving your audio feeds perfectly!
-                </span>
-              </div>
-
-              {/* iOS Premium Toggle Switch */}
-              <button
-                onClick={() => handleToggleCompressVideo(!compressVideo)}
-                style={{
-                  width: "48px",
-                  height: "26px",
-                  borderRadius: "9999px",
-                  background: compressVideo ? "#F59E0B" : "rgba(100, 116, 139, 0.15)",
-                  border: "1px solid rgba(255,255,255,0.05)",
-                  position: "relative",
-                  cursor: "pointer",
-                  transition: "background-color 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
-                  padding: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  flexShrink: 0,
-                  boxShadow: compressVideo ? "0 2px 8px rgba(245, 158, 11, 0.3)" : "none",
-                }}
-              >
-                <div
-                  style={{
-                    width: "20px",
-                    height: "20px",
-                    borderRadius: "50%",
-                    background: "#ffffff",
-                    position: "absolute",
-                    left: compressVideo ? "24px" : "3px",
-                    transition: "left 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
-                    boxShadow: "0 2px 4px rgba(0,0,0,0.2)"
-                  }}
-                />
-              </button>
-            </div>
-          </div>
-          
-          {/* Quick FAQ / Specs Card */}
-          <div
-            className="glass-card"
-            style={{
-              padding: "1.15rem",
-              borderRadius: "14px",
-              border: "1px solid var(--border-default)",
-              background: "rgba(15, 23, 42, 0.15)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.5rem"
-            }}
-          >
-            <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Technical Specifications
-            </span>
-            <ul style={{ margin: 0, paddingLeft: "1.1rem", display: "flex", flexDirection: "column", gap: "0.35rem", fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 500 }}>
-              <li>Uses premium <strong>H.264 High-Profile</strong> video encoders maximizing compatibility with Telegram's Web Player.</li>
-              <li>Preserves original frame rates, scaling resolutions, and aspect ratios.</li>
-              <li>Strict <strong>zero-reencode audio copy</strong> preserves your master tracks completely.</li>
-              <li>Runs fully multi-threaded asynchronously on the server to prevent browser thread locking.</li>
-            </ul>
-          </div>
-        </div>
-      )}
 
       {/* Uploads Tab Dedicated Sequential Queue Dashboard */}
       {tab === "uploads" && (
@@ -2463,7 +2368,7 @@ function DashboardContent() {
       )}
 
       {/* Main Files Table Card */}
-      {!(tab === "folders" && !selectedFolderCategory) && tab !== "uploads" && tab !== "settings" && (
+      {!(tab === "folders" && !selectedFolderCategory) && tab !== "uploads" && (
         <div
           className="glass-card animate-slide-up"
           style={{

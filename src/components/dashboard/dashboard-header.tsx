@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef } from "react";
 import { NotificationItem } from "@/app/(protected)/dashboard/page";
 
+import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
+
 interface DashboardHeaderProps {
   searchTerm: string;
   setSearchTerm: (value: string) => void;
@@ -111,8 +113,9 @@ export function DashboardHeader({
       {/* Action Widgets */}
       <div style={{ display: "flex", alignItems: "center", gap: "1.25rem" }}>
         {/* Light/Dark Toggle */}
-        <button
-          onClick={toggleDarkMode}
+        <AnimatedThemeToggler
+          variant="circle"
+          duration={550}
           style={{
             background: "none",
             border: "none",
@@ -121,13 +124,17 @@ export function DashboardHeader({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            outline: "none",
+            transition: "all 0.2s ease",
+            color: "#FBBF24"
           }}
-        >
-          <svg style={{ width: "1.2rem", height: "1.2rem", color: "#F59E0B" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="4"/>
-            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
-          </svg>
-        </button>
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = "scale(1.05)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = "scale(1)";
+          }}
+        />
 
         {/* Notifications Bell & Dropdown */}
         <div ref={dropdownRef} style={{ position: "relative", display: "flex", alignItems: "center" }}>

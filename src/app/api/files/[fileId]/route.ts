@@ -171,6 +171,19 @@ export async function GET(
       isRange = false;
     }
 
+    // Capping range chunk size to 2MB (sliding window) for extremely fast dynamic progressive streaming
+    // HTML5 media player issues multiple progressive range requests as the buffer advances.
+    // Capping prevents background buffer bloat, eliminates connection choking, and enables instantaneous seeking.
+    if (isRange) {
+      const MAX_CHUNK_SIZE = 2 * 1024 * 1024; // Highly responsive 2MB chunks
+      if ((endByte - startByte) + 1 > MAX_CHUNK_SIZE) {
+        endByte = startByte + MAX_CHUNK_SIZE - 1;
+        if (endByte >= fileSize) {
+          endByte = fileSize - 1;
+        }
+      }
+    }
+
     const chunkSize = (endByte - startByte) + 1;
 
     // Disconnect helper to release client safely once stream closes
