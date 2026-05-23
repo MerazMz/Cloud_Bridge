@@ -29,12 +29,28 @@ export function VideoThumbnail({ fileId }: { fileId: string }) {
     const handleSeeked = () => {
       try {
         const canvas = document.createElement("canvas");
-        canvas.width = 60;
-        canvas.height = 60;
+        
+        // Dynamically match video aspect ratio while capping width at 320px for high-fidelity sharp rendering
+        const maxThumbnailWidth = 320;
+        const nativeWidth = video.videoWidth || 320;
+        const nativeHeight = video.videoHeight || 180;
+        
+        let targetWidth = nativeWidth;
+        let targetHeight = nativeHeight;
+        
+        if (nativeWidth > maxThumbnailWidth) {
+          const ratio = maxThumbnailWidth / nativeWidth;
+          targetWidth = maxThumbnailWidth;
+          targetHeight = Math.round(nativeHeight * ratio);
+        }
+        
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        
         const ctx = canvas.getContext("2d");
         if (ctx) {
-          ctx.drawImage(video, 0, 0, 60, 60);
-          const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+          ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.9); // Increase JPEG quality to 90%
           videoThumbnailCache.set(fileId, dataUrl);
           setCachedSrc(dataUrl);
         }
