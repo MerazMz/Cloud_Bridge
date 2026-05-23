@@ -2,7 +2,6 @@ import { successResponse, errorResponse } from "@/lib/api-response";
 import { getCurrentUserId } from "@/services/auth/auth.service";
 import { prisma } from "@/lib/prisma";
 import { createLogger } from "@/lib/logger";
-import { SemanticSearchService } from "@/services/semantic-search/semantic-search.service";
 import type { UserProfile } from "@/types/auth.types";
 
 const log = createLogger("API:me");
@@ -14,9 +13,6 @@ export async function GET() {
     if (!userId) {
       return errorResponse("Not authenticated.", 401);
     }
-
-    // Preemptively ensure the semantic search server is running in the background
-    SemanticSearchService.ensureServerRunning().catch(() => {});
 
     const user = await prisma.user.findUnique({
       where: { id: userId },

@@ -49,6 +49,12 @@ const envSchema = z.object({
     .string()
     .url("NEXT_PUBLIC_APP_URL must be a valid URL")
     .default("http://localhost:3000"),
+
+  // Semantic Search remote endpoint
+  SEMANTIC_SEARCH_URL: z
+    .string()
+    .url("SEMANTIC_SEARCH_URL must be a valid URL")
+    .optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

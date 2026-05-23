@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
     const query = searchParams.get("q") || "rice";
 
     // 1. Generate query embedding
-    const queryEmbedding = await SemanticSearchService.generateEmbedding({
+    const { embedding: queryEmbedding } = await SemanticSearchService.generateEmbedding({
       action: "text",
       query: query,
     });

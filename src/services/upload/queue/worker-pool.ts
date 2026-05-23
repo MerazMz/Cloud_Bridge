@@ -347,14 +347,14 @@ class UploadWorkerPool {
           action = "video";
         }
 
-        const embedding = await SemanticSearchService.generateEmbedding({
+        const { embedding, caption } = await SemanticSearchService.generateEmbedding({
           action,
           filepath: job.tempFilePath,
           filename: job.fileName,
         });
 
-        await SemanticSearchService.saveEmbedding(fileRecord.id, job.userId, embedding);
-        log.info("Semantic embedding generated and saved successfully", { fileId: fileRecord.id });
+        await SemanticSearchService.saveEmbedding(fileRecord.id, job.userId, embedding, caption);
+        log.info("Semantic embedding and caption generated and saved successfully", { fileId: fileRecord.id, hasCaption: !!caption });
       } catch (embedErr: any) {
         log.error("Failed to generate/save semantic embedding for file during upload", {
           fileId: fileRecord.id,
