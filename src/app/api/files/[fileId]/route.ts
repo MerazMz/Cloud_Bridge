@@ -507,14 +507,47 @@ export async function PATCH(
       data.fileName = cleanName;
     }
 
+    if (body.hasOwnProperty("parentId")) {
+      const targetParentId = body.parentId; // Can be string or null
+      if (targetParentId !== null && typeof targetParentId !== "string") {
+        return errorResponse("Invalid parentId.", 400);
+      }
+      
+      if (targetParentId === fileId) {
+        return errorResponse("Cannot move an item into itself.", 400);
+      }
+
+      // If this is a folder, verify we are not nesting it inside itself or one of its descendants
+      if (file.mimeType === "folder" && targetParentId !== null) {
+        const isDescendant = async (parentFolderId: string, potentialChildId: string): Promise<boolean> => {
+          if (parentFolderId === potentialChildId) return true;
+          const folder = await prisma.file.findUnique({
+            where: { id: potentialChildId },
+            select: { parentId: true },
+          });
+          if (!folder || !folder.parentId) return false;
+          return isDescendant(parentFolderId, folder.parentId);
+        };
+
+        const invalidNesting = await isDescendant(fileId, targetParentId);
+        if (invalidNesting) {
+          return errorResponse("Cannot move a folder into itself or one of its subfolders.", 400);
+        }
+      }
+
+      data.parentId = targetParentId;
+    }
+
     if (Object.keys(data).length === 0) {
       return errorResponse("No fields to update.", 400);
     }
 
-    if (data.isDeleted === false && file.mimeType === "folder") {
-      await recursivelyRestore(fileId);
-    } else if (data.isDeleted === true && file.mimeType === "folder") {
-      await recursivelySoftDelete(fileId);
+    if (data.hasOwnProperty("isDeleted")) {
+      if (data.isDeleted === false && file.mimeType === "folder") {
+        await recursivelyRestore(fileId);
+      } else if (data.isDeleted === true && file.mimeType === "folder") {
+        await recursivelySoftDelete(fileId);
+      }
     }
 
     const updatedFile = await prisma.file.update({

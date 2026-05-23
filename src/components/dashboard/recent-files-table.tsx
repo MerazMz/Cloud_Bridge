@@ -30,6 +30,16 @@ interface RecentFilesTableProps {
   handleToggleSelectActive?: (id: string) => void;
   handleToggleSelectAllActive?: (fileList: DBFile[]) => void;
   onSelectClick?: (file: DBFile) => void;
+
+  // Drag & Drop Props
+  tab?: string;
+  onDragStart?: (e: React.DragEvent, item: DBFile) => void;
+  onDragEnd?: () => void;
+  onDragOver?: (e: React.DragEvent, item: DBFile) => void;
+  onDragLeave?: () => void;
+  onDrop?: (e: React.DragEvent, item: DBFile) => void;
+  draggedItem?: DBFile | null;
+  dragOverItem?: DBFile | null;
 }
 
 export function RecentFilesTable({
@@ -58,6 +68,14 @@ export function RecentFilesTable({
   handleToggleSelectActive,
   handleToggleSelectAllActive,
   onSelectClick,
+  tab = "dashboard",
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  draggedItem = null,
+  dragOverItem = null,
 }: RecentFilesTableProps) {
   if (filesLoading && fileList.length === 0) {
     return (
@@ -116,6 +134,12 @@ export function RecentFilesTable({
           return (
             <tr
               key={file.id}
+              draggable={tab === "my-files" && !isMultiSelectMode}
+              onDragStart={(e) => onDragStart?.(e, file)}
+              onDragEnd={onDragEnd}
+              onDragOver={(e) => onDragOver?.(e, file)}
+              onDragLeave={onDragLeave}
+              onDrop={(e) => onDrop?.(e, file)}
               onClick={(e) => {
                 if (isMultiSelectMode) {
                   e.stopPropagation();
@@ -131,6 +155,11 @@ export function RecentFilesTable({
                   ? (darkMode ? "rgba(245, 158, 11, 0.08)" : "rgba(245, 158, 11, 0.04)")
                   : "transparent",
               }}
+              className={`folder-card-hover ${
+                tab === "my-files" && !isMultiSelectMode ? "dnd-draggable" : ""
+              } ${draggedItem?.id === file.id ? "dnd-dragged" : ""} ${
+                dragOverItem?.id === file.id ? "dnd-dragover" : ""
+              }`}
             >
               {isMultiSelectMode && (
                 <td style={{ padding: "0.85rem 0.5rem", width: "40px" }} onClick={(e) => e.stopPropagation()}>
