@@ -24,7 +24,7 @@ import { ConfirmationModal } from "@/components/dashboard/confirmation-modal";
 import { DBFile } from "@/types/file.types";
 
 export interface NotificationItem {
-  id: string;
+  id: stringi have made some changes ;
   type: "success" | "cancel" | "error" | "info";
   message: string;
   timestamp: Date;
@@ -40,6 +40,7 @@ export interface QueueItem {
   uploadedBytes?: number;
   parentId?: string | null;
   cancel?: () => void;
+  isSecure?: boolean;
 }
 
 function DashboardContent() {
@@ -73,6 +74,21 @@ function DashboardContent() {
   const [selectedActiveIds, setSelectedActiveIds] = useState<Record<string, boolean>>({});
   const [isBatchActiveDeleting, setIsBatchActiveDeleting] = useState(false);
   const selectedActiveIdsArray = Object.keys(selectedActiveIds).filter((id) => selectedActiveIds[id]);
+
+  // Secure Folder State
+  const [isSecureUnlocked, setIsSecureUnlocked] = useState(false);
+  const shouldLockVaultAfterUploadsRef = useRef(false);
+  const [hasSecurePassword, setHasSecurePassword] = useState(false);
+  const [securePassword, setSecurePassword] = useState("");
+  const [securePasswordConfirm, setSecurePasswordConfirm] = useState("");
+  const [secureOtp, setSecureOtp] = useState("");
+  const [secureOtpSent, setSecureOtpSent] = useState(false);
+  const [isSecureLoading, setIsSecureLoading] = useState(false);
+  const [secureUploadPrompt, setSecureUploadPrompt] = useState<{
+    isOpen: boolean;
+    onConfirm: (password: string) => void;
+    onCancel: () => void;
+  } | null>(null);
 
   // Sorting and Filtering States for My Files
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "largest" | "smallest">("newest");
@@ -223,6 +239,7 @@ function DashboardContent() {
       speed: "0 KB/s",
       uploadedBytes: 0,
       parentId: parentId,
+      isSecure: tab === "secure-folder",
     }));
     setUploadQueue((prev) => [...prev, ...newItems]);
   };
@@ -513,12 +530,15 @@ function DashboardContent() {
   const fetchFiles = async (folderId: string | null = currentFolderId) => {
     setFilesLoading(true);
     try {
-      const res = await fetch(`/api/folders?parentId=${folderId || ""}`);
+      const isSecure = tab === "secure-folder";
+      const res = await fetch(`/api/folders?parentId=${folderId || ""}${isSecure ? "&secure=true" : ""}`);
       const json = await res.json();
       if (json.success) {
         setFiles(json.items);
       } else {
-        showToast("error", json.message || "Failed to load files.");
+        if (json.message !== "Secure folder is locked. Please unlock it first.") {
+          showToast("error", json.message || "Failed to load files.");
+        }
       }
     } catch (err) {
       showToast("error", "An error occurred while fetching files.");
@@ -581,7 +601,306 @@ function DashboardContent() {
     if (user && user.storageChannelId) {
       fetchFiles(currentFolderId);
     }
-  }, [user, currentFolderId]);
+  }, [user, currentFolderId, tab]);
+
+  // Reset folder navigation when changing tabs
+  useEffect(() => {
+    setCurrentFolderId(null);
+    setFolderBreadcrumbs([]);
+  }, [tab]);
+
+  // Lock secure folder when navigating away from it
+  useEffect(() => {
+    if (tab !== "secure-folder" && isSecureUnlocked) {
+      const hasActiveSecureUploads = uploadQueue.some(
+        (item) => item.isSecure && (item.status === "pending" || item.status === "uploading")
+      );
+      if (hasActiveSecureUploads) {
+        shouldLockVaultAfterUploadsRef.current = true;
+      } else {
+        fetch("/api/auth/secure-folder/lock", { method: "POST" })
+          .then((res) => res.json())
+          .then((json) => {
+            if (json.success) {
+              setIsSecureUnlocked(false);
+            }
+          })
+          .catch((err) => console.error("Error locking secure folder on tab change", err));
+      }
+    }
+  }, [tab, isSecureUnlocked, uploadQueue]);
+
+  // Check secure folder status
+  const checkSecureStatus = async () => {
+    try {
+      const res = await fetch("/api/auth/secure-folder/status");
+      const json = await res.json();
+      if (json.success) {
+        setHasSecurePassword(json.data.hasPassword);
+        setIsSecureUnlocked(json.data.isUnlocked);
+      }
+    } catch (err) {
+      console.error("Failed to check secure folder status", err);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "secure-folder") {
+      checkSecureStatus();
+    }
+  }, [tab]);
+
+  // Listen to custom refresh and toast events
+  useEffect(() => {
+    const handleRefresh = () => {
+      fetchFiles(currentFolderId);
+      fetchAllFiles();
+      if (tab === "secure-folder") {
+        checkSecureStatus();
+      }
+    };
+    const handleCustomToast = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail) {
+        showToast(customEvent.detail.type, customEvent.detail.message);
+      }
+    };
+
+    window.addEventListener("cloudbridge-refresh-files", handleRefresh);
+    window.addEventListener("cloudbridge-toast", handleCustomToast);
+
+    return () => {
+      window.removeEventListener("cloudbridge-refresh-files", handleRefresh);
+      window.removeEventListener("cloudbridge-toast", handleCustomToast);
+    };
+  }, [currentFolderId, tab]);
+
+  // Listen to custom sidebar lock events
+  useEffect(() => {
+    const handleLockVaultEvent = () => {
+      if (isSecureUnlocked) {
+        handleLockSecureFolder();
+      }
+    };
+    window.addEventListener("cloudbridge-lock-vault", handleLockVaultEvent);
+    return () => {
+      window.removeEventListener("cloudbridge-lock-vault", handleLockVaultEvent);
+    };
+  }, [isSecureUnlocked]);
+
+  const handleSendSecureOtp = async () => {
+    setIsSecureLoading(true);
+    try {
+      const res = await fetch("/api/auth/secure-folder/send-otp", { method: "POST" });
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", "OTP sent to your Telegram Saved Messages.");
+        setSecureOtpSent(true);
+      } else {
+        showToast("error", json.message || "Failed to send OTP.");
+      }
+    } catch {
+      showToast("error", "An error occurred while sending OTP.");
+    } finally {
+      setIsSecureLoading(false);
+    }
+  };
+
+  const handleSetupSecurePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (securePassword !== securePasswordConfirm) {
+      showToast("error", "Passwords do not match.");
+      return;
+    }
+    setIsSecureLoading(true);
+    try {
+      const res = await fetch("/api/auth/secure-folder/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ otp: secureOtp, password: securePassword }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", "Secure password configured successfully!");
+        setSecurePassword("");
+        setSecurePasswordConfirm("");
+        setSecureOtp("");
+        setSecureOtpSent(false);
+        setIsSecureUnlocked(true);
+        setHasSecurePassword(true);
+        fetchFiles(null);
+        fetchAllFiles();
+      } else {
+        showToast("error", json.message || "Failed to configure password.");
+      }
+    } catch {
+      showToast("error", "An error occurred during password setup.");
+    } finally {
+      setIsSecureLoading(false);
+    }
+  };
+
+  const handleUnlockSecureFolder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSecureLoading(true);
+    try {
+      const res = await fetch("/api/auth/secure-folder/unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: securePassword }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", "Vault unlocked successfully.");
+        setSecurePassword("");
+        setIsSecureUnlocked(true);
+        fetchFiles(null);
+      } else {
+        showToast("error", json.message || "Incorrect password.");
+      }
+    } catch {
+      showToast("error", "An error occurred while unlocking.");
+    } finally {
+      setIsSecureLoading(false);
+    }
+  };
+
+  const handleLockSecureFolder = async () => {
+    setIsSecureLoading(true);
+    try {
+      const res = await fetch("/api/auth/secure-folder/lock", { method: "POST" });
+      const json = await res.json();
+      if (json.success) {
+        showToast("info", "Secure folder locked.");
+        setIsSecureUnlocked(false);
+        setFiles([]);
+      } else {
+        showToast("error", json.message || "Failed to lock secure folder.");
+      }
+    } catch {
+      showToast("error", "An error occurred while locking.");
+    } finally {
+      setIsSecureLoading(false);
+    }
+  };
+
+  const handleTriggerPasswordReset = async () => {
+    setHasSecurePassword(false);
+    setSecureOtpSent(false);
+    setSecureOtp("");
+    setSecurePassword("");
+    setSecurePasswordConfirm("");
+    await handleSendSecureOtp();
+  };
+
+  const promptSecurePassword = () => {
+    return new Promise<string | null>((resolve) => {
+      setSecureUploadPrompt({
+        isOpen: true,
+        onConfirm: (password) => {
+          setSecureUploadPrompt(null);
+          resolve(password);
+        },
+        onCancel: () => {
+          setSecureUploadPrompt(null);
+          resolve(null);
+        }
+      });
+    });
+  };
+
+  const checkSecureUnlockedStatus = async (): Promise<boolean> => {
+    try {
+      const res = await fetch("/api/auth/secure-folder/status");
+      const json = await res.json();
+      return json.success && json.data.isUnlocked;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleMoveToSecure = async (file: DBFile) => {
+    const isSecuring = !file.isSecure;
+    
+    if (isSecuring) {
+      const password = await promptSecurePassword();
+      if (!password) return;
+      
+      const unlockRes = await fetch("/api/auth/secure-folder/unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      const unlockJson = await unlockRes.json();
+      if (!unlockJson.success) {
+        showToast("error", "Incorrect secure password. Action aborted.");
+        return;
+      }
+    } else {
+      const isUnlocked = await checkSecureUnlockedStatus();
+      if (!isUnlocked) {
+        const password = await promptSecurePassword();
+        if (!password) return;
+        
+        const unlockRes = await fetch("/api/auth/secure-folder/unlock", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password }),
+        });
+        const unlockJson = await unlockRes.json();
+        if (!unlockJson.success) {
+          showToast("error", "Incorrect secure password. Action aborted.");
+          return;
+        }
+      }
+    }
+
+    try {
+      const res = await fetch(`/api/files/${file.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isSecure: isSecuring, parentId: null }),
+      });
+      
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", isSecuring ? `"${file.fileName}" secured.` : `"${file.fileName}" unsecured.`);
+        fetchFiles(currentFolderId);
+        fetchAllFiles();
+      } else {
+        showToast("error", json.message || "Failed to update item vault status.");
+      }
+    } catch {
+      showToast("error", "An error occurred while moving item.");
+    }
+  };
+
+  const handleUploadClick = async (isFolder: boolean) => {
+    if (tab === "secure-folder") {
+      const password = await promptSecurePassword();
+      if (!password) return;
+
+      const res = await fetch("/api/auth/secure-folder/unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        showToast("error", "Incorrect secure password. Upload aborted.");
+        return;
+      }
+    }
+
+    setUploadTargetFolderId(currentFolderId);
+    setTimeout(() => {
+      if (isFolder) {
+        folderInputRef.current?.click();
+      } else {
+        fileInputRef.current?.click();
+      }
+    }, 150);
+  };
 
   useEffect(() => {
     if (user && user.storageChannelId) {
@@ -637,7 +956,7 @@ function DashboardContent() {
     const nextItem = uploadQueue.find((item) => item.status === "pending");
 
     if (nextItem && !activeItem) {
-      uploadQueueItem(nextItem.id, nextItem.file, nextItem.parentId);
+      uploadQueueItem(nextItem.id, nextItem.file, nextItem.parentId, nextItem.isSecure);
     }
   }, [uploadQueue]);
 
@@ -719,7 +1038,7 @@ function DashboardContent() {
   };
 
   // Processes and uploads a single item in the queue sequentially
-  const uploadQueueItem = async (itemId: string, file: File, itemParentId?: string | null) => {
+  const uploadQueueItem = async (itemId: string, file: File, itemParentId?: string | null, isItemSecure?: boolean) => {
 
     // 2. Mark status as uploading
     setUploadQueue((prev) =>
@@ -761,6 +1080,9 @@ function DashboardContent() {
       }
       if (compressVideoRef.current) {
         headers["x-compress-video"] = "true";
+      }
+      if (isItemSecure) {
+        headers["x-is-secure"] = "true";
       }
 
       const responseData = await uploadFileWithXhr({
@@ -900,10 +1222,24 @@ function DashboardContent() {
 
       // Check if there are any remaining items in the queue that are pending or active
       let hasMore = false;
+      let hasMoreSecure = false;
       setUploadQueue((current) => {
         hasMore = current.some((i) => i.id !== itemId && (i.status === "pending" || i.status === "uploading"));
+        hasMoreSecure = current.some((i) => i.id !== itemId && i.isSecure && (i.status === "pending" || i.status === "uploading"));
         return current;
       });
+
+      if (!hasMoreSecure && shouldLockVaultAfterUploadsRef.current) {
+        shouldLockVaultAfterUploadsRef.current = false;
+        fetch("/api/auth/secure-folder/lock", { method: "POST" })
+          .then((res) => res.json())
+          .then((json) => {
+            if (json.success) {
+              setIsSecureUnlocked(false);
+            }
+          })
+          .catch((err) => console.error("Error locking secure folder after uploads finished", err));
+      }
 
       if (!hasMore) {
         // Clear global states so that if the queue finishes, the bottom HUD goes away!
@@ -1842,6 +2178,21 @@ function DashboardContent() {
     setIsDragActive(false);
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      if (tab === "secure-folder") {
+        const password = await promptSecurePassword();
+        if (!password) return;
+        
+        const res = await fetch("/api/auth/secure-folder/unlock", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password }),
+        });
+        const json = await res.json();
+        if (!json.success) {
+          showToast("error", "Incorrect password. Drag upload aborted.");
+          return;
+        }
+      }
       addFilesToQueue(e.dataTransfer.files);
       router.push("/dashboard?tab=uploads");
     }
@@ -1888,6 +2239,7 @@ function DashboardContent() {
                   body: JSON.stringify({
                     name: segment,
                     parentId: currentParentId,
+                    isSecure: tab === "secure-folder",
                   }),
                 });
                 const json = await res.json();
@@ -1927,6 +2279,7 @@ function DashboardContent() {
           speed: "0 KB/s",
           uploadedBytes: 0,
           parentId: parentId,
+          isSecure: tab === "secure-folder",
         });
       }
 
@@ -2241,6 +2594,8 @@ function DashboardContent() {
     visibleFiles = activeFiles.filter((f) => f.isShared);
   } else if (tab === "trash") {
     visibleFiles = allFiles.filter((f) => f.isDeleted);
+  } else if (tab === "secure-folder") {
+    visibleFiles = activeFiles;
   } else if (tab === "folders") {
     if (selectedFolderCategory === "images") visibleFiles = imageFiles;
     else if (selectedFolderCategory === "documents") visibleFiles = documentFiles;
@@ -2638,7 +2993,7 @@ function DashboardContent() {
       />
 
       {/* Welcome & Cover Banner */}
-      {tab !== "settings" && (
+      {tab !== "settings" && !(tab === "secure-folder" && !isSecureUnlocked) && (
         <WelcomeBanner
           userName={userName}
           tab={tab}
@@ -3304,8 +3659,198 @@ function DashboardContent() {
         </div>
       )}
 
+      {/* Secure Folder Lock/Setup Panel */}
+      {tab === "secure-folder" && !isSecureUnlocked && (
+        <div
+          className="glass-card animate-fade-in"
+          style={{
+            maxWidth: "500px",
+            margin: "2rem auto",
+            padding: "2.5rem 2rem",
+            borderRadius: "20px",
+            border: "1px solid var(--border-default)",
+            background: "var(--bg-card)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "1.5rem",
+            boxShadow: "var(--glass-shadow)",
+            textAlign: "center",
+            width: "100%",
+          }}
+        >
+          {!hasSecurePassword ? (
+            <>
+              <div
+                className="animate-float"
+                style={{
+                  width: "64px",
+                  height: "64px",
+                  borderRadius: "50%",
+                  background: "rgba(245, 158, 11, 0.1)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#F59E0B",
+                  marginBottom: "0.5rem",
+                }}
+              >
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                <h3 style={{ fontSize: "1.3rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.02em", margin: 0 }}>
+                  Configure Secure Folder
+                </h3>
+                <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", fontWeight: 500, margin: 0, lineHeight: "1.4" }}>
+                  Set up a secure passcode to encrypt and protect your private documents. Verification is sent to your Telegram Saved Messages.
+                </p>
+              </div>
+
+              {!secureOtpSent ? (
+                <button
+                  onClick={handleSendSecureOtp}
+                  disabled={isSecureLoading}
+                  className="btn btn-primary"
+                  style={{ width: "100%", height: "46px" }}
+                >
+                  {isSecureLoading ? "Sending Code..." : "Send Verification Code"}
+                </button>
+              ) : (
+                <form
+                  onSubmit={handleSetupSecurePassword}
+                  style={{ display: "flex", flexDirection: "column", gap: "1rem", width: "100%" }}
+                >
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", textAlign: "left" }}>
+                    <label style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--text-secondary)" }}>
+                      Telegram Verification Code
+                    </label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="Enter 6-digit OTP"
+                      value={secureOtp}
+                      onChange={(e) => setSecureOtp(e.target.value)}
+                      maxLength={6}
+                      required
+                    />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", textAlign: "left" }}>
+                    <label style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--text-secondary)" }}>
+                      New Secure Password
+                    </label>
+                    <input
+                      type="password"
+                      className="input-field"
+                      placeholder="Create secure password"
+                      value={securePassword}
+                      onChange={(e) => setSecurePassword(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", textAlign: "left" }}>
+                    <label style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--text-secondary)" }}>
+                      Confirm Secure Password
+                    </label>
+                    <input
+                      type="password"
+                      className="input-field"
+                      placeholder="Confirm secure password"
+                      value={securePasswordConfirm}
+                      onChange={(e) => setSecurePasswordConfirm(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isSecureLoading}
+                    className="btn btn-primary"
+                    style={{ width: "100%", height: "46px", marginTop: "0.5rem" }}
+                  >
+                    {isSecureLoading ? "Setting Password..." : "Set Password & Unlock"}
+                  </button>
+                  <div style={{ display: "flex", justifyContent: "center", gap: "1rem", fontSize: "0.78rem" }}>
+                    <span style={{ color: "var(--text-muted)" }}>Didn't receive it?</span>
+                    <button
+                      type="button"
+                      onClick={handleSendSecureOtp}
+                      style={{ background: "none", border: "none", color: "#F59E0B", fontWeight: 700, cursor: "pointer" }}
+                    >
+                      Resend Code
+                    </button>
+                  </div>
+                </form>
+              )}
+            </>
+          ) : (
+            <>
+              <div
+                style={{
+                  width: "64px",
+                  height: "64px",
+                  borderRadius: "50%",
+                  background: "rgba(245, 158, 11, 0.1)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#F59E0B",
+                  marginBottom: "0.5rem",
+                  boxShadow: "0 0 15px rgba(245, 158, 11, 0.2)",
+                }}
+              >
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                <h3 style={{ fontSize: "1.3rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.02em", margin: 0 }}>
+                  Secure Vault Locked
+                </h3>
+                <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", fontWeight: 500, margin: 0 }}>
+                  Enter your secure password to access your private files.
+                </p>
+              </div>
+
+              <form
+                onSubmit={handleUnlockSecureFolder}
+                style={{ display: "flex", flexDirection: "column", gap: "1rem", width: "100%" }}
+              >
+                <input
+                  type="password"
+                  className="input-field"
+                  placeholder="Enter secure password"
+                  value={securePassword}
+                  onChange={(e) => setSecurePassword(e.target.value)}
+                  required
+                />
+                <button
+                  type="submit"
+                  disabled={isSecureLoading}
+                  className="btn btn-primary"
+                  style={{ width: "100%", height: "46px" }}
+                >
+                  {isSecureLoading ? "Unlocking..." : "Unlock Vault"}
+                </button>
+                <div style={{ display: "flex", justifyContent: "center", gap: "0.5rem", fontSize: "0.78rem" }}>
+                  <button
+                    type="button"
+                    onClick={handleTriggerPasswordReset}
+                    style={{ background: "none", border: "none", color: "var(--text-muted)", fontWeight: 600, cursor: "pointer", transition: "color 0.15s ease" }}
+                  >
+                    Reset Password via Telegram OTP
+                  </button>
+                </div>
+              </form>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Main Files Table Card */}
-      {!(tab === "folders" && !selectedFolderCategory) && tab !== "uploads" && tab !== "settings" && (
+      {!(tab === "folders" && !selectedFolderCategory) && tab !== "uploads" && tab !== "settings" && !(tab === "secure-folder" && !isSecureUnlocked) && (
         <div
           className="glass-card animate-slide-up"
           style={{
@@ -3348,7 +3893,7 @@ function DashboardContent() {
               )}
 
               {/* Dynamic interactive Breadcrumbs */}
-              {(tab === "dashboard" || tab === "my-files") ? (
+              {(tab === "dashboard" || tab === "my-files" || tab === "secure-folder") ? (
                 <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap", fontSize: "0.85rem" }}>
                   <button
                     onClick={() => handleNavigateBreadcrumb(-1)}
@@ -3366,7 +3911,7 @@ function DashboardContent() {
                     }}
                     className="dropdown-item-hover"
                   >
-                    Root
+                    {tab === "secure-folder" ? "Secure Folder" : "Root"}
                   </button>
                   {folderBreadcrumbs.map((bc, idx) => (
                     <div key={bc.id} style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
@@ -3392,7 +3937,7 @@ function DashboardContent() {
                     </div>
                   ))}
 
-                  {currentFolderId !== null && (
+                  {(currentFolderId !== null || tab === "secure-folder") && (
                     <div style={{ position: "relative", display: "inline-block", marginLeft: "0.3rem" }} onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={(e) => {
@@ -3443,10 +3988,7 @@ function DashboardContent() {
                             onClick={(e) => {
                               e.stopPropagation();
                               setIsCurrentFolderUploadMenuOpen(false);
-                              setUploadTargetFolderId(currentFolderId);
-                              setTimeout(() => {
-                                fileInputRef.current?.click();
-                              }, 150);
+                              handleUploadClick(false);
                             }}
                             className="dropdown-item-hover"
                             style={{
@@ -3473,10 +4015,7 @@ function DashboardContent() {
                             onClick={(e) => {
                               e.stopPropagation();
                               setIsCurrentFolderUploadMenuOpen(false);
-                              setUploadTargetFolderId(currentFolderId);
-                              setTimeout(() => {
-                                folderInputRef.current?.click();
-                              }, 150);
+                              handleUploadClick(true);
                             }}
                             className="dropdown-item-hover"
                             style={{
@@ -3547,7 +4086,7 @@ function DashboardContent() {
               </div>
             )}
 
-            {(tab === "dashboard" || tab === "my-files") && (
+            {(tab === "dashboard" || tab === "my-files" || tab === "secure-folder") && (
               <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexWrap: "wrap" }}>
                 {/* Segemented View Mode Controller */}
                 <div style={{
@@ -3652,7 +4191,7 @@ function DashboardContent() {
                 )}
 
                 {/* Filter & Sort Dropdown Component */}
-                {tab === "my-files" && (
+                {(tab === "my-files" || tab === "secure-folder") && (
                   <div style={{ position: "relative" }}>
                     <button
                       onClick={() => setIsFilterDropdownOpen(!isFilterDropdownOpen)}
@@ -3871,6 +4410,39 @@ function DashboardContent() {
                   New Folder
                 </button>
 
+                {/* Lock Vault Button */}
+                {tab === "secure-folder" && (
+                  <button
+                    onClick={handleLockSecureFolder}
+                    style={{
+                      fontSize: "0.78rem",
+                      fontWeight: 700,
+                      color: "#fff",
+                      background: "linear-gradient(135deg, #ef4444, #dc2626)",
+                      border: "none",
+                      borderRadius: "8px",
+                      padding: "0.45rem 0.85rem",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.35rem",
+                      cursor: "pointer",
+                      boxShadow: "0 2px 8px rgba(239, 68, 68, 0.25)",
+                      transition: "transform 0.15s ease",
+                      height: "32px",
+                      marginLeft: "0.5rem"
+                    }}
+                    onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.96)")}
+                    onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
+                    title="Lock Secure Folder Vault"
+                  >
+                    <svg style={{ width: "0.85rem", height: "0.85rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                    Lock Vault
+                  </button>
+                )}
+
                 {tab === "dashboard" && (
                   <a
                     href="/dashboard?tab=my-files"
@@ -3900,7 +4472,7 @@ function DashboardContent() {
           </div>
 
           {/* Premium Folder Cards Grid Panel */}
-          {(tab === "dashboard" || tab === "my-files") && finalFilteredFiles.filter((f) => f.mimeType === "folder").length > 0 && (
+          {(tab === "dashboard" || tab === "my-files" || tab === "secure-folder") && finalFilteredFiles.filter((f) => f.mimeType === "folder").length > 0 && (
             <div style={{ marginBottom: "1.8rem" }}>
               <h4 style={{ fontSize: "0.76rem", fontWeight: 700, color: darkMode ? "#94a3b8" : "#64748b", marginBottom: "0.8rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                 Folders ({finalFilteredFiles.filter((f) => f.mimeType === "folder").length})
@@ -4796,6 +5368,7 @@ function DashboardContent() {
                     handleRevokeShare={handleRevokeShare}
                     handleDownload={handleDownload}
                     handleMoveToTrash={handleMoveToTrash}
+                    handleMoveToSecure={handleMoveToSecure}
                     getFileStyle={getFileStyle}
                     classifyFile={classifyFile}
                     renderFileIcon={renderFileIcon}
@@ -5217,14 +5790,73 @@ function DashboardContent() {
 
             {/* Action Buttons */}
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+              {/* Move to Secure Vault */}
+              {tab !== "secure-folder" && (
+                <button
+                  onClick={async () => {
+                    const password = await promptSecurePassword();
+                    if (!password) return;
+                    setIsBatchActiveDeleting(true);
+                    try {
+                      const unlockRes = await fetch("/api/auth/secure-folder/unlock", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ password }),
+                      });
+                      const unlockJson = await unlockRes.json();
+                      if (!unlockJson.success) {
+                        showToast("error", "Incorrect secure password. Action aborted.");
+                        return;
+                      }
+
+                      const res = await fetch("/api/files/batch", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ fileIds: selectedActiveIdsArray, isSecure: true, parentId: null }),
+                      });
+                      const json = await res.json();
+                      if (json.success) {
+                        showToast("success", `Moved ${selectedActiveIdsArray.length} items to Secure Folder.`);
+                        setSelectedActiveIds({});
+                        fetchFiles(currentFolderId);
+                        fetchAllFiles();
+                      } else {
+                        showToast("error", json.message || "Failed to secure items.");
+                      }
+                    } catch {
+                      showToast("error", "An error occurred.");
+                    } finally {
+                      setIsBatchActiveDeleting(false);
+                    }
+                  }}
+                  disabled={isBatchActiveDeleting}
+                  style={{
+                    background: "rgba(245, 158, 11, 0.12)",
+                    border: "1px solid rgba(245, 158, 11, 0.2)",
+                    color: "#F59E0B",
+                    cursor: "pointer",
+                    padding: "0.45rem 1rem",
+                    borderRadius: "8px",
+                    fontSize: "0.8rem",
+                    fontWeight: 700,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.4rem",
+                    transition: "all 0.2s ease",
+                  }}
+                >
+                  Move to Vault
+                </button>
+              )}
+
               {/* Move to Trash */}
               <button
                 onClick={() => handleBatchMoveToTrash(selectedActiveIdsArray)}
                 disabled={isBatchActiveDeleting}
                 style={{
-                  background: "rgba(245, 158, 11, 0.12)",
-                  border: "1px solid rgba(245, 158, 11, 0.2)",
-                  color: "#F59E0B",
+                  background: "rgba(239, 68, 68, 0.12)",
+                  border: "1px solid rgba(239, 68, 68, 0.2)",
+                  color: "#EF4444",
                   cursor: "pointer",
                   padding: "0.45rem 1rem",
                   borderRadius: "8px",
@@ -5893,6 +6525,125 @@ function DashboardContent() {
             ) : (
               <span>Zoom: {Math.round(imageZoom * 100)}% • Rotation: {imageRotation}° • Controls: Arrow Keys (Nav) • Esc (Exit) • +/- (Zoom)</span>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Premium Secure Upload/Action Password Prompt Modal */}
+      {secureUploadPrompt?.isOpen && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.4)",
+            backdropFilter: "blur(8px)",
+            zIndex: 999999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "1rem",
+            animation: "fadeIn 0.2s ease-out",
+          }}
+        >
+          <div
+            className="glass-card"
+            style={{
+              width: "380px",
+              background: "var(--bg-card)",
+              border: "1px solid var(--border-default)",
+              borderRadius: "14px",
+              padding: "1.5rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: "1.25rem",
+              boxShadow: "var(--glass-shadow)",
+              textAlign: "center",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <div
+                style={{
+                  width: "48px",
+                  height: "48px",
+                  borderRadius: "50%",
+                  background: "rgba(245, 158, 11, 0.1)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#F59E0B",
+                }}
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+              <h3 style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.02em", margin: 0 }}>
+                Enter Secure Password
+              </h3>
+              <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", fontWeight: 500, margin: 0 }}>
+                Verify password to perform secure operation.
+              </p>
+            </div>
+
+            <input
+              id="secure-prompt-input"
+              type="password"
+              className="input-field"
+              placeholder="Secure password"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const val = (e.target as HTMLInputElement).value;
+                  secureUploadPrompt.onConfirm(val);
+                }
+              }}
+              autoFocus
+            />
+
+            <div style={{ display: "flex", gap: "0.75rem", width: "100%" }}>
+              <button
+                onClick={() => secureUploadPrompt.onCancel()}
+                style={{
+                  flex: 1,
+                  padding: "0.65rem",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border-default)",
+                  background: "var(--bg-secondary)",
+                  color: "var(--text-primary)",
+                  fontWeight: 700,
+                  fontSize: "0.85rem",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const input = document.getElementById("secure-prompt-input") as HTMLInputElement;
+                  if (input) secureUploadPrompt.onConfirm(input.value);
+                }}
+                style={{
+                  flex: 1,
+                  padding: "0.65rem",
+                  borderRadius: "8px",
+                  background: "#F59E0B",
+                  color: "#ffffff",
+                  border: "none",
+                  fontWeight: 700,
+                  fontSize: "0.85rem",
+                  cursor: "pointer",
+                  boxShadow: "0 2px 6px rgba(245, 158, 11, 0.2)",
+                }}
+              >
+                Confirm
+              </button>
+            </div>
           </div>
         </div>
       )}

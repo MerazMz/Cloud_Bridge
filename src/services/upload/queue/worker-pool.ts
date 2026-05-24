@@ -4,6 +4,7 @@ import { getClientForUser } from "@/services/telegram/telegram.service";
 import { createTelegramClient } from "@/services/telegram/client";
 import { decryptSession } from "@/services/crypto/crypto.service";
 import { prisma } from "@/lib/prisma";
+import { getJSON, del } from "@/lib/redis";
 import { Api } from "telegram";
 import bigInt from "big-integer";
 import { createLogger } from "@/lib/logger";
@@ -325,6 +326,25 @@ class UploadWorkerPool {
         throw new Error("Telegram failed to register file message.");
       }
 
+      // Check secure status
+      let isSecureFile = false;
+      if (job.parentId) {
+        const parentFolder = await prisma.file.findUnique({
+          where: { id: job.parentId },
+          select: { isSecure: true },
+        });
+        if (parentFolder && parentFolder.isSecure) {
+          isSecureFile = true;
+        }
+      }
+
+      if (!isSecureFile) {
+        const isJobSecure = await getJSON<string>(`secure_job:${job.id}`);
+        if (isJobSecure === "true") {
+          isSecureFile = true;
+        }
+      }
+
       // 5. Register file details in the main File table scoped to parent directory if applicable
       const fileRecord = await prisma.file.create({
         data: {
@@ -334,8 +354,13 @@ class UploadWorkerPool {
           fileSize: uploadFileSize,
           mimeType,
           parentId: job.parentId || null,
+          isSecure: isSecureFile,
         },
       });
+
+      if (isSecureFile) {
+        await del(`secure_job:${job.id}`);
+      }
 
       // Generate and save semantic search embedding
       try {

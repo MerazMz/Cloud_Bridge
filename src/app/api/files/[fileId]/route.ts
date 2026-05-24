@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { getCurrentUserId } from "@/services/auth/auth.service";
 import { prisma } from "@/lib/prisma";
+import { getJSON } from "@/lib/redis";
 import { createLogger } from "@/lib/logger";
 import {
   getClientForUser,
@@ -41,6 +42,14 @@ export async function GET(
 
     if (file.userId !== userId) {
       return errorResponse("Unauthorized.", 403);
+    }
+
+    // Check secure status
+    if (file.isSecure) {
+      const isUnlocked = (await getJSON<string>(`secure_unlocked:${userId}`)) === "true";
+      if (!isUnlocked) {
+        return errorResponse("Secure folder is locked. Please unlock it first.", 403);
+      }
     }
 
     // Get user storage channel information
@@ -327,6 +336,14 @@ export async function DELETE(
       return errorResponse("Unauthorized.", 403);
     }
 
+    // Check secure status
+    if (file.isSecure) {
+      const isUnlocked = (await getJSON<string>(`secure_unlocked:${userId}`)) === "true";
+      if (!isUnlocked) {
+        return errorResponse("Secure folder is locked. Please unlock it first.", 403);
+      }
+    }
+
     // Read query parameters
     const url = new URL(request.url);
     const permanent = url.searchParams.get("permanent") === "true";
@@ -465,6 +482,28 @@ async function recursivelyRestore(folderId: string) {
   }
 }
 
+async function recursivelySetSecure(folderId: string, isSecure: boolean) {
+  await prisma.file.update({
+    where: { id: folderId },
+    data: { isSecure },
+  });
+
+  const children = await prisma.file.findMany({
+    where: { parentId: folderId },
+  });
+
+  for (const child of children) {
+    if (child.mimeType === "folder") {
+      await recursivelySetSecure(child.id, isSecure);
+    } else {
+      await prisma.file.update({
+        where: { id: child.id },
+        data: { isSecure },
+      });
+    }
+  }
+}
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ fileId: string }> }
@@ -489,7 +528,21 @@ export async function PATCH(
     }
 
     const body = await request.json();
+
+    // Check secure status (either starts secure, or we are securing it)
+    const isMovingToSecure = body.isSecure === true;
+    if (file.isSecure || isMovingToSecure) {
+      const isUnlocked = (await getJSON<string>(`secure_unlocked:${userId}`)) === "true";
+      if (!isUnlocked) {
+        return errorResponse("Secure folder is locked. Please unlock it first.", 403);
+      }
+    }
+
     const data: any = {};
+
+    if (typeof body.isSecure === "boolean") {
+      data.isSecure = body.isSecure;
+    }
 
     if (typeof body.isDeleted === "boolean") {
       data.isDeleted = body.isDeleted;
@@ -547,6 +600,12 @@ export async function PATCH(
         await recursivelyRestore(fileId);
       } else if (data.isDeleted === true && file.mimeType === "folder") {
         await recursivelySoftDelete(fileId);
+      }
+    }
+
+    if (data.hasOwnProperty("isSecure")) {
+      if (file.mimeType === "folder") {
+        await recursivelySetSecure(fileId, data.isSecure);
       }
     }
 

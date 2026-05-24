@@ -15,6 +15,7 @@ interface RecentFilesTableProps {
   handleRevokeShare: (id: string) => void;
   handleDownload: (id: string, name: string) => void;
   handleMoveToTrash: (file: DBFile) => void;
+  handleMoveToSecure?: (file: DBFile) => void;
   getFileStyle: (mime: string, name: string) => { bg: string; color: string };
   classifyFile: (mime: string, name: string) => string;
   renderFileIcon: (category: string, fileName?: string, mimeType?: string) => React.ReactNode;
@@ -53,6 +54,7 @@ export function RecentFilesTable({
   handleRevokeShare,
   handleDownload,
   handleMoveToTrash,
+  handleMoveToSecure,
   getFileStyle,
   classifyFile,
   renderFileIcon,
@@ -525,6 +527,39 @@ export function RecentFilesTable({
                             <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z" />
                           </svg>
                           <span style={{ fontSize: "0.78rem", fontWeight: 600, color: darkMode ? "#ffffff" : "#0f172a" }}>Rename</span>
+                        </button>
+                      )}
+
+                      {/* Move to Secure Folder Action */}
+                      {handleMoveToSecure && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuFileId(null);
+                            handleMoveToSecure(file);
+                          }}
+                          className="dropdown-item-hover"
+                          style={{
+                            background: "none",
+                            border: "none",
+                            borderRadius: "6px",
+                            padding: "0.45rem 0.65rem",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.6rem",
+                            cursor: "pointer",
+                            width: "100%",
+                            textAlign: "left",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          <svg style={{ width: "0.95rem", height: "0.95rem", color: darkMode ? "#cbd5e1" : "#475569" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                          </svg>
+                          <span style={{ fontSize: "0.78rem", fontWeight: 600, color: darkMode ? "#ffffff" : "#0f172a" }}>
+                            {file.isSecure ? "Move out of Vault" : "Move to Vault"}
+                          </span>
                         </button>
                       )}
 

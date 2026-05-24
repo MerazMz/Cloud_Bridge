@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getCurrentUserId } from "@/services/auth/auth.service";
 import { prisma } from "@/lib/prisma";
+import { getJSON, setWithTTL } from "@/lib/redis";
 import { createLogger } from "@/lib/logger";
 import { uploadService } from "@/services/upload/upload.service";
 
@@ -64,6 +65,28 @@ export async function POST(request: NextRequest) {
       parentId = null;
     }
 
+    const isSecureHeader = request.headers.get("x-is-secure") === "true";
+    let shouldBeSecure = isSecureHeader;
+
+    if (parentId) {
+      const parentFolder = await prisma.file.findUnique({
+        where: { id: parentId },
+      });
+      if (parentFolder && parentFolder.isSecure) {
+        shouldBeSecure = true;
+      }
+    }
+
+    if (shouldBeSecure) {
+      const isUnlocked = (await getJSON<string>(`secure_unlocked:${userId}`)) === "true";
+      if (!isUnlocked) {
+        return new Response(
+          JSON.stringify({ success: false, message: "Secure folder is locked. Please unlock it first." }),
+          { status: 403, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    }
+
     if (!fileStream) {
       return new Response(
         JSON.stringify({ success: false, message: "No file provided." }),
@@ -85,6 +108,10 @@ export async function POST(request: NextRequest) {
       parentId || undefined,
       shouldCompress
     );
+
+    if (shouldBeSecure) {
+      await setWithTTL(`secure_job:${jobId}`, "true", 3600 * 24); // 24 hours TTL
+    }
 
     return new Response(
       JSON.stringify({ success: true, jobId }),

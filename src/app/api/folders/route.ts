@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getCurrentUserId } from "@/services/auth/auth.service";
 import { prisma } from "@/lib/prisma";
+import { getJSON } from "@/lib/redis";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("API:folders");
@@ -21,9 +22,20 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
+    const secureParam = searchParams.get("secure") === "true";
     let parentId: string | null = searchParams.get("parentId");
     if (parentId === "null" || parentId === "undefined" || !parentId) {
       parentId = null;
+    }
+
+    if (secureParam) {
+      const isUnlocked = (await getJSON<string>(`secure_unlocked:${userId}`)) === "true";
+      if (!isUnlocked) {
+        return new Response(
+          JSON.stringify({ success: false, message: "Secure folder is locked. Please unlock it first." }),
+          { status: 403, headers: { "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // Fetch all folders and files inside the current parent directory scope
@@ -32,6 +44,7 @@ export async function GET(request: NextRequest) {
         userId,
         parentId,
         isDeleted: false,
+        isSecure: secureParam,
       },
       orderBy: [
         { mimeType: "asc" }, // This naturally brings "folder" before standard file MIME types if alphabetically sorted, but we will sort explicitly in JS
@@ -88,7 +101,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, parentId } = body;
+    const { name, parentId, isSecure } = body;
 
     if (!name || typeof name !== "string" || !name.trim()) {
       return new Response(
@@ -103,6 +116,8 @@ export async function POST(request: NextRequest) {
       parentGuid = null;
     }
 
+    let shouldBeSecure = isSecure === true;
+
     // 1. If a parent directory ID is provided, verify its existence and ownership
     if (parentGuid) {
       const parentFolder = await prisma.file.findUnique({
@@ -115,6 +130,20 @@ export async function POST(request: NextRequest) {
           { status: 400, headers: { "Content-Type": "application/json" } }
         );
       }
+
+      if (parentFolder.isSecure) {
+        shouldBeSecure = true;
+      }
+    }
+
+    if (shouldBeSecure) {
+      const isUnlocked = (await getJSON<string>(`secure_unlocked:${userId}`)) === "true";
+      if (!isUnlocked) {
+        return new Response(
+          JSON.stringify({ success: false, message: "Secure folder is locked. Please unlock it first." }),
+          { status: 403, headers: { "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // 2. Prevent naming collisions inside the same directory scope
@@ -125,6 +154,7 @@ export async function POST(request: NextRequest) {
         fileName: cleanName,
         mimeType: "folder",
         isDeleted: false,
+        isSecure: shouldBeSecure,
       },
     });
 
@@ -144,6 +174,7 @@ export async function POST(request: NextRequest) {
         fileSize: BigInt(0),
         mimeType: "folder",
         parentId: parentGuid,
+        isSecure: shouldBeSecure,
       },
     });
 

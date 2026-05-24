@@ -137,6 +137,59 @@ function LayoutWithSidebarContent({ children }: { children: React.ReactNode }) {
             </svg>
             <span>Trash</span>
           </Link>
+          <Link
+            href="/dashboard?tab=secure-folder"
+            className={`nav-link ${tab === "secure-folder" ? "active" : ""}`}
+            onClick={(e) => {
+              if (tab === "secure-folder") {
+                e.preventDefault();
+                window.dispatchEvent(new CustomEvent("cloudbridge-lock-vault"));
+              }
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.currentTarget.classList.add("drag-over");
+            }}
+            onDragLeave={(e) => {
+              e.currentTarget.classList.remove("drag-over");
+            }}
+            onDrop={async (e) => {
+              e.preventDefault();
+              e.currentTarget.classList.remove("drag-over");
+              const raw = e.dataTransfer.getData("text/plain");
+              if (!raw) return;
+              try {
+                const data = JSON.parse(raw);
+                const itemIds = data.ids || [];
+                if (itemIds.length > 0) {
+                  const res = await fetch("/api/files/batch", {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ fileIds: itemIds, isSecure: true, parentId: null }),
+                  });
+                  const json = await res.json();
+                  if (json.success) {
+                    window.dispatchEvent(new CustomEvent("cloudbridge-refresh-files"));
+                    window.dispatchEvent(new CustomEvent("cloudbridge-toast", {
+                      detail: { type: "success", message: `Moved ${itemIds.length} item(s) to Secure Folder.` }
+                    }));
+                  } else {
+                    window.dispatchEvent(new CustomEvent("cloudbridge-toast", {
+                      detail: { type: "error", message: json.message || "Failed to secure items." }
+                    }));
+                  }
+                }
+              } catch (err) {
+                console.error("Secure Folder drop error:", err);
+              }
+            }}
+          >
+            <svg style={{ width: "1.15rem", height: "1.15rem", flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            <span>Secure Folder</span>
+          </Link>
           <Link href="/dashboard?tab=settings" className={`nav-link ${tab === "settings" ? "active" : ""}`}>
             <svg style={{ width: "1.15rem", height: "1.15rem", flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="3"/>

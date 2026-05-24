@@ -830,6 +830,7 @@ export const UserScalarFieldEnum = {
   displayName: 'displayName',
   username: 'username',
   profilePhotoUrl: 'profilePhotoUrl',
+  securePasswordHash: 'securePasswordHash',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
@@ -859,6 +860,7 @@ export const FileScalarFieldEnum = {
   mimeType: 'mimeType',
   isDeleted: 'isDeleted',
   isShared: 'isShared',
+  isSecure: 'isSecure',
   parentId: 'parentId',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'

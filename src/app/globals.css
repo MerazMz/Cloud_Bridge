@@ -221,6 +221,18 @@ body {
   color: #fbbf24;
 }
 
+.nav-link.drag-over {
+  background: rgba(245, 158, 11, 0.2) !important;
+  border: 1.5px dashed #f59e0b !important;
+  color: #d97706 !important;
+  transform: scale(1.03);
+}
+
+.dark .nav-link.drag-over {
+  background: rgba(245, 158, 11, 0.3) !important;
+  color: #fbbf24 !important;
+}
+
 /* ─── Animations ────────────────────────────────────────── */
 
 @keyframes fade-in {
