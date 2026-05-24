@@ -84,8 +84,8 @@ function DashboardContent() {
   const [dragOverItem, setDragOverItem] = useState<DBFile | null>(null);
   const [mergeModal, setMergeModal] = useState<{
     isOpen: boolean;
-    fileA: DBFile;
-    fileB: DBFile;
+    filesToMerge: DBFile[];
+    targetFile: DBFile;
     folderName: string;
   } | null>(null);
   const [undoStack, setUndoStack] = useState<Array<{
@@ -245,6 +245,18 @@ function DashboardContent() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  // Listen for Escape key to exit multi-select mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isMultiSelectMode) {
+        setIsMultiSelectMode(false);
+        setSelectedActiveIds({});
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isMultiSelectMode]);
+
   // Client-side visual state features
   const [favorites, setFavorites] = useState<string[]>([]);
   const [sharedIds, setSharedIds] = useState<string[]>([]);
@@ -392,6 +404,7 @@ function DashboardContent() {
   useEffect(() => {
     const handleGlobalClick = () => {
       setActiveMenuFileId(null);
+      setActiveUploadFolderMenuId(null);
     };
     window.addEventListener("click", handleGlobalClick);
     return () => window.removeEventListener("click", handleGlobalClick);
@@ -420,6 +433,8 @@ function DashboardContent() {
   const currentJobIdRef = useRef<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const [activeUploadFolderMenuId, setActiveUploadFolderMenuId] = useState<string | null>(null);
 
   // Initialize theme and local storage states
   useEffect(() => {
@@ -1194,13 +1209,38 @@ function DashboardContent() {
 
   // Drag & Drop Handlers for My Files
   const handleDragStart = (e: React.DragEvent, item: DBFile) => {
-    if (tab !== "my-files" || isMultiSelectMode) {
+    const target = e.target as HTMLElement;
+    if (
+      target.closest("button") ||
+      target.closest("input") ||
+      target.closest("select") ||
+      target.closest("a")
+    ) {
       e.preventDefault();
       return;
     }
-    setDraggedItem(item);
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", item.id);
+
+    if (tab !== "my-files") {
+      e.preventDefault();
+      return;
+    }
+
+    if (isMultiSelectMode) {
+      // If item being dragged is not in selection, select it
+      let finalSelection = [...selectedActiveIdsArray];
+      if (!selectedActiveIds[item.id]) {
+        setSelectedActiveIds((prev) => ({ ...prev, [item.id]: true }));
+        finalSelection.push(item.id);
+      }
+
+      setDraggedItem(item);
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", JSON.stringify({ isBatch: true, ids: finalSelection }));
+    } else {
+      setDraggedItem(item);
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", JSON.stringify({ isBatch: false, ids: [item.id] }));
+    }
   };
 
   const handleDragEnd = () => {
@@ -1212,18 +1252,25 @@ function DashboardContent() {
     e.preventDefault();
     if (!draggedItem || draggedItem.id === item.id) return;
 
-    // Prevent loop: a folder cannot be dropped inside its descendants
-    if (draggedItem.mimeType === "folder") {
-      const isDescendant = (parentId: string | null): boolean => {
-        if (!parentId) return false;
-        if (parentId === draggedItem.id) return true;
-        const parentFolder = allFiles.find((f) => f.id === parentId);
-        return parentFolder ? isDescendant(parentFolder.parentId || null) : false;
-      };
+    const itemsToMoveIds = isMultiSelectMode
+      ? Array.from(new Set([...selectedActiveIdsArray, draggedItem.id]))
+      : [draggedItem.id];
 
-      if (item.mimeType === "folder" && (item.id === draggedItem.id || isDescendant(item.id))) {
-        return;
+    if (itemsToMoveIds.includes(item.id)) return;
+
+    // Prevent loop: a folder cannot be dropped inside its descendants
+    const isDescendantOfAnyDraggedFolder = (parentId: string | null | undefined): boolean => {
+      if (!parentId) return false;
+      if (itemsToMoveIds.includes(parentId)) {
+        const parentFolder = allFiles.find((f) => f.id === parentId);
+        if (parentFolder && parentFolder.mimeType === "folder") return true;
       }
+      const parentFolder = allFiles.find((f) => f.id === parentId);
+      return parentFolder ? isDescendantOfAnyDraggedFolder(parentFolder.parentId) : false;
+    };
+
+    if (item.mimeType === "folder" && isDescendantOfAnyDraggedFolder(item.id)) {
+      return;
     }
 
     setDragOverItem(item);
@@ -1238,38 +1285,98 @@ function DashboardContent() {
     setDragOverItem(null);
     if (!draggedItem || draggedItem.id === target.id) return;
 
-    // FEATURE 1: Drag File onto File -> Create Folder
-    if (draggedItem.mimeType !== "folder" && target.mimeType !== "folder") {
-      setMergeModal({ isOpen: true, fileA: draggedItem, fileB: target, folderName: "" });
+    // Identify all items we are dragging
+    let itemsToMoveIds = isMultiSelectMode
+      ? [...selectedActiveIdsArray]
+      : [draggedItem.id];
+
+    if (isMultiSelectMode && !itemsToMoveIds.includes(draggedItem.id)) {
+      itemsToMoveIds.push(draggedItem.id);
+    }
+
+    if (itemsToMoveIds.includes(target.id)) {
+      showToast("info", "Cannot move items onto themselves.");
       return;
     }
 
-    // FEATURE 2 & 3: Drag File/Folder into Folder -> Move / Nest
+    const itemsToMove = allFiles.filter((f) => itemsToMoveIds.includes(f.id));
+
+    // Case 1: Drop onto a Folder -> Batch Move / Nest
     if (target.mimeType === "folder") {
-      // Loop prevention check for folder nesting
-      const isDescendant = (parentId: string | null | undefined): boolean => {
+      const isDescendantOfAnyDraggedFolder = (parentId: string | null | undefined): boolean => {
         if (!parentId) return false;
-        if (parentId === draggedItem.id) return true;
+        if (itemsToMoveIds.includes(parentId)) {
+          const parentFolder = allFiles.find((f) => f.id === parentId);
+          if (parentFolder && parentFolder.mimeType === "folder") return true;
+        }
         const parentFolder = allFiles.find((f) => f.id === parentId);
-        return parentFolder ? isDescendant(parentFolder.parentId) : false;
+        return parentFolder ? isDescendantOfAnyDraggedFolder(parentFolder.parentId) : false;
       };
 
-      if (draggedItem.mimeType === "folder" && isDescendant(target.id)) {
-        showToast("info", "Cannot move a folder into one of its subfolders.");
+      if (isDescendantOfAnyDraggedFolder(target.id)) {
+        showToast("info", "Cannot move a folder into itself or one of its subfolders.");
         return;
       }
 
-      if (draggedItem.parentId === target.id) return;
+      const itemsToActuallyMove = itemsToMove.filter((item) => item.parentId !== target.id);
+      if (itemsToActuallyMove.length === 0) return;
 
       // Start visually premium merge transitions
       setMergingSourceId(draggedItem.id);
       setMergingTargetId(target.id);
 
       setTimeout(async () => {
-        await moveItem(draggedItem.id, target.id);
+        await moveItemsBatch(itemsToActuallyMove.map(i => i.id), target.id);
         setMergingSourceId(null);
         setMergingTargetId(null);
+        setSelectedActiveIds({});
       }, 400);
+    }
+    // Case 2: Drop onto a File -> Merge into new Folder
+    else {
+      setMergeModal({
+        isOpen: true,
+        filesToMerge: itemsToMove,
+        targetFile: target,
+        folderName: "",
+      });
+    }
+  };
+
+  const moveItemsBatch = async (itemIds: string[], targetParentId: string | null) => {
+    const items = allFiles.filter((f) => itemIds.includes(f.id));
+    if (items.length === 0) return;
+
+    try {
+      const movePromises = items.map((item) =>
+        fetch(`/api/files/${item.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ parentId: targetParentId }),
+        }).then((res) => res.json())
+      );
+
+      const results = await Promise.all(movePromises);
+      const successfulMoves = results.filter((res) => res.success);
+
+      if (successfulMoves.length === items.length) {
+        showToast("success", `Moved ${items.length} items successfully.`);
+        setUndoStack((prev) => [
+          {
+            action: "move",
+            items: items.map((item) => ({ id: item.id, oldParentId: item.parentId || null })),
+          },
+          ...prev,
+        ]);
+        fetchFiles(currentFolderId);
+        fetchAllFiles();
+      } else {
+        showToast("error", `Failed to move some items (${successfulMoves.length}/${items.length} succeeded).`);
+        fetchFiles(currentFolderId);
+        fetchAllFiles();
+      }
+    } catch {
+      showToast("error", "An error occurred while moving items.");
     }
   };
 
@@ -1303,11 +1410,15 @@ function DashboardContent() {
 
   const handleMergeCreateFolder = async (folderName: string) => {
     if (!mergeModal || !folderName.trim()) return;
-    const { fileA, fileB } = mergeModal;
+    const { filesToMerge, targetFile } = mergeModal;
     setMergeModal(null);
 
-    setMergingSourceId(fileA.id);
-    setMergingTargetId(fileB.id);
+    const itemIdsToMove = filesToMerge.map((f) => f.id);
+    if (!itemIdsToMove.includes(targetFile.id)) {
+      itemIdsToMove.push(targetFile.id);
+    }
+
+    setMergingSourceId(targetFile.id);
 
     try {
       // 1. Create Folder
@@ -1326,28 +1437,30 @@ function DashboardContent() {
         
         setNewFolderScaleInId(newFolderId);
 
-        // 2. Move both files inside new folder
-        const moveA = fetch(`/api/files/${fileA.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ parentId: newFolderId }),
-        });
-        const moveB = fetch(`/api/files/${fileB.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ parentId: newFolderId }),
-        });
+        // 2. Move files inside the new folder
+        const movePromises = itemIdsToMove.map((id) =>
+          fetch(`/api/files/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ parentId: newFolderId }),
+          }).then((r) => r.json())
+        );
 
-        await Promise.all([moveA, moveB]);
-        showToast("success", `Created folder "${folderName.trim()}" containing both files.`);
+        const moveResults = await Promise.all(movePromises);
+        const successfulCount = moveResults.filter((r) => r.success).length;
+
+        if (successfulCount === itemIdsToMove.length) {
+          showToast("success", `Created folder "${folderName.trim()}" containing ${itemIdsToMove.length} items.`);
+        } else {
+          showToast("info", `Created folder, but failed to move some items (${successfulCount}/${itemIdsToMove.length} succeeded).`);
+        }
+
+        const oldItems = allFiles.filter((f) => itemIdsToMove.includes(f.id));
 
         setUndoStack((prev) => [
           {
             action: "create_folder_group",
-            items: [
-              { id: fileA.id, oldParentId: fileA.parentId || null },
-              { id: fileB.id, oldParentId: fileB.parentId || null },
-            ],
+            items: oldItems.map((item) => ({ id: item.id, oldParentId: item.parentId || null })),
             newFolderId,
           },
           ...prev,
@@ -1377,20 +1490,23 @@ function DashboardContent() {
 
     try {
       if (lastAction.action === "move") {
-        const { id, oldParentId } = lastAction.items[0];
-        const res = await fetch(`/api/files/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ parentId: oldParentId }),
-        });
-        const json = await res.json();
-        if (json.success) {
+        const moves = lastAction.items.map((item) =>
+          fetch(`/api/files/${item.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ parentId: item.oldParentId }),
+          }).then((res) => res.json())
+        );
+        const results = await Promise.all(moves);
+        const successCount = results.filter((r) => r.success).length;
+
+        if (successCount === lastAction.items.length) {
           showToast("info", "Move undone.");
-          fetchFiles(currentFolderId);
-          fetchAllFiles();
         } else {
-          showToast("error", "Failed to undo move.");
+          showToast("error", `Undo partially succeeded (${successCount}/${lastAction.items.length} undone).`);
         }
+        fetchFiles(currentFolderId);
+        fetchAllFiles();
       } else if (lastAction.action === "create_folder_group") {
         // Move files back to original parents
         const moves = lastAction.items.map((item) =>
@@ -1731,7 +1847,90 @@ function DashboardContent() {
 
   const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      addFilesToQueue(e.target.files, uploadTargetFolderId);
+      const filesArray = Array.from(e.target.files);
+      const hasFolders = filesArray.some((f) => f.webkitRelativePath);
+      
+      let folderPathCache: Record<string, string> = {};
+      const targetFolderId = uploadTargetFolderId !== null ? uploadTargetFolderId : currentFolderId;
+
+      const resolveFolderPath = async (relativePath: string): Promise<string | null> => {
+        const segments = relativePath.split("/").filter(Boolean);
+        if (segments.length <= 1) return targetFolderId;
+        
+        const folderSegments = segments.slice(0, -1);
+        let currentParentId = targetFolderId;
+        
+        let pathPrefix = "";
+        for (const segment of folderSegments) {
+          pathPrefix = pathPrefix ? `${pathPrefix}/${segment}` : segment;
+          
+          if (folderPathCache[pathPrefix]) {
+            currentParentId = folderPathCache[pathPrefix];
+          } else {
+            const existingFolder = allFiles.find(
+              (f) =>
+                f.mimeType === "folder" &&
+                f.fileName.toLowerCase() === segment.toLowerCase() &&
+                (f.parentId === currentParentId || (!f.parentId && !currentParentId)) &&
+                !f.isDeleted
+            );
+            
+            if (existingFolder) {
+              folderPathCache[pathPrefix] = existingFolder.id;
+              currentParentId = existingFolder.id;
+            } else {
+              try {
+                const res = await fetch("/api/folders", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    name: segment,
+                    parentId: currentParentId,
+                  }),
+                });
+                const json = await res.json();
+                if (json.success) {
+                  folderPathCache[pathPrefix] = json.folder.id;
+                  currentParentId = json.folder.id;
+                  allFiles.push(json.folder);
+                } else {
+                  console.error("Failed to create folder:", json.message);
+                }
+              } catch (err) {
+                console.error("Error creating folder in path:", err);
+              }
+            }
+          }
+        }
+        return currentParentId;
+      };
+
+      if (hasFolders) {
+        showToast("info", "Resolving folder structure...");
+      }
+
+      const queueItems: QueueItem[] = [];
+      for (const file of filesArray) {
+        let parentId = targetFolderId;
+        if (file.webkitRelativePath) {
+          const resolved = await resolveFolderPath(file.webkitRelativePath);
+          if (resolved) parentId = resolved;
+        }
+        
+        queueItems.push({
+          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          file,
+          progress: 0,
+          status: "pending",
+          speed: "0 KB/s",
+          uploadedBytes: 0,
+          parentId: parentId,
+        });
+      }
+
+      setUploadQueue((prev) => [...prev, ...queueItems]);
+      fetchFiles(currentFolderId);
+      fetchAllFiles();
       router.push("/dashboard?tab=uploads");
     }
   };
@@ -2414,6 +2613,16 @@ function DashboardContent() {
         }
       `}</style>
       <input type="file" ref={fileInputRef} onChange={handleFileChange} style={{ display: "none" }} multiple />
+      <input
+        type="file"
+        ref={folderInputRef}
+        onChange={handleFileChange}
+        style={{ display: "none" }}
+        // @ts-ignore
+        webkitdirectory=""
+        directory=""
+        multiple
+      />
       {/* Top Header Bar */}
       <DashboardHeader
         searchTerm={searchTerm}
@@ -3589,7 +3798,7 @@ function DashboardContent() {
                   .map((folder) => (
                     <div
                       key={folder.id}
-                      draggable={tab === "my-files" && !isMultiSelectMode}
+                      draggable={tab === "my-files"}
                       onDragStart={(e) => handleDragStart(e, folder as any)}
                       onDragEnd={handleDragEnd}
                       onDragOver={(e) => handleDragOver(e, folder as any)}
@@ -3628,7 +3837,7 @@ function DashboardContent() {
                         transition: "all 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
                       }}
                       className={`folder-card-hover ${
-                        tab === "my-files" && !isMultiSelectMode ? "dnd-draggable" : ""
+                        tab === "my-files" ? "dnd-draggable" : ""
                       } ${draggedItem?.id === folder.id ? "dnd-dragged" : ""} ${
                         dragOverItem?.id === folder.id ? "dnd-dragover" : ""
                       } ${
@@ -3659,7 +3868,7 @@ function DashboardContent() {
                         />
                       )}
 
-                      {/* Actions: 3-dot menu + delete — top-right corner */}
+                      {/* Actions: Direct upload plus, 3-dot menu + delete — top-right corner */}
                       <div
                         style={{
                           position: "absolute",
@@ -3672,11 +3881,124 @@ function DashboardContent() {
                         }}
                         onClick={(e) => e.stopPropagation()}
                       >
+                        {/* Direct upload plus button dropdown container */}
+                        {!isMultiSelectMode && (
+                          <div style={{ position: "relative" }}>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                setActiveUploadFolderMenuId(
+                                  activeUploadFolderMenuId === folder.id ? null : folder.id
+                                );
+                                setActiveMenuFileId(null);
+                              }}
+                              style={{
+                                background: "none",
+                                border: "none",
+                                color: darkMode ? "#94a3b8" : "#64748b",
+                                cursor: "pointer",
+                                padding: "0.2rem",
+                                borderRadius: "4px",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                transition: "all 0.15s ease",
+                              }}
+                              className="dropdown-item-hover"
+                              title={`Upload directly to ${folder.fileName}`}
+                            >
+                              <svg style={{ width: "0.85rem", height: "0.85rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                              </svg>
+                            </button>
+
+                            {activeUploadFolderMenuId === folder.id && (
+                              <div
+                                className="glass-card"
+                                style={{
+                                  position: "absolute",
+                                  right: 0,
+                                  top: "100%",
+                                  background: darkMode ? "#1e293b" : "#ffffff",
+                                  border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
+                                  borderRadius: "8px",
+                                  padding: "0.35rem",
+                                  zIndex: 100,
+                                  boxShadow: darkMode ? "0 10px 15px -3px rgba(0, 0, 0, 0.3)" : "0 10px 15px -3px rgba(15, 23, 42, 0.08)",
+                                  minWidth: "125px",
+                                }}
+                              >
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveUploadFolderMenuId(null);
+                                    setUploadTargetFolderId(folder.id);
+                                    setTimeout(() => {
+                                      fileInputRef.current?.click();
+                                    }, 150);
+                                  }}
+                                  className="dropdown-item-hover"
+                                  style={{
+                                    width: "100%",
+                                    textAlign: "left",
+                                    background: "none",
+                                    border: "none",
+                                    color: darkMode ? "#ffffff" : "#0f172a",
+                                    fontSize: "0.74rem",
+                                    fontWeight: 700,
+                                    padding: "0.45rem 0.65rem",
+                                    borderRadius: "6px",
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "0.4rem",
+                                  }}
+                                >
+                                  <span>📄</span>
+                                  <span>Upload Files</span>
+                                </button>
+
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveUploadFolderMenuId(null);
+                                    setUploadTargetFolderId(folder.id);
+                                    setTimeout(() => {
+                                      folderInputRef.current?.click();
+                                    }, 150);
+                                  }}
+                                  className="dropdown-item-hover"
+                                  style={{
+                                    width: "100%",
+                                    textAlign: "left",
+                                    background: "none",
+                                    border: "none",
+                                    color: darkMode ? "#ffffff" : "#0f172a",
+                                    fontSize: "0.74rem",
+                                    fontWeight: 700,
+                                    padding: "0.45rem 0.65rem",
+                                    borderRadius: "6px",
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "0.4rem",
+                                  }}
+                                >
+                                  <span>📁</span>
+                                  <span>Upload Folder</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         <div style={{ position: "relative" }}>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               setActiveMenuFileId(activeMenuFileId === folder.id ? null : folder.id);
+                              setActiveUploadFolderMenuId(null);
                             }}
                             style={{
                               background: "none",
@@ -3893,7 +4215,7 @@ function DashboardContent() {
                       return (
                         <div
                           key={file.id}
-                          draggable={tab === "my-files" && !isMultiSelectMode}
+                          draggable={tab === "my-files"}
                           onDragStart={(e) => handleDragStart(e, file as any)}
                           onDragEnd={handleDragEnd}
                           onDragOver={(e) => handleDragOver(e, file as any)}
@@ -3920,7 +4242,7 @@ function DashboardContent() {
                             boxShadow: "none",
                           }}
                           className={`folder-card-hover ${
-                            tab === "my-files" && !isMultiSelectMode ? "dnd-draggable" : ""
+                            tab === "my-files" ? "dnd-draggable" : ""
                           } ${draggedItem?.id === file.id ? "dnd-dragged" : ""} ${
                             dragOverItem?.id === file.id ? "dnd-dragover" : ""
                           } ${
@@ -4641,7 +4963,16 @@ function DashboardContent() {
                 lineHeight: "1.4",
               }}
             >
-              You are merging <strong>{mergeModal.fileA.fileName}</strong> and <strong>{mergeModal.fileB.fileName}</strong>. Enter a folder name below to group them.
+              {mergeModal.filesToMerge.length === 1 ? (
+                <>
+                  You are merging <strong>{mergeModal.filesToMerge[0].fileName}</strong> and <strong>{mergeModal.targetFile.fileName}</strong>.
+                </>
+              ) : (
+                <>
+                  You are merging <strong>{mergeModal.filesToMerge.length} items</strong> and <strong>{mergeModal.targetFile.fileName}</strong>.
+                </>
+              )}
+              {" "}Enter a folder name below to group them.
             </p>
 
             <form

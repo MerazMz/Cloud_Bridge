@@ -134,7 +134,7 @@ export function RecentFilesTable({
           return (
             <tr
               key={file.id}
-              draggable={tab === "my-files" && !isMultiSelectMode}
+              draggable={tab === "my-files"}
               onDragStart={(e) => onDragStart?.(e, file)}
               onDragEnd={onDragEnd}
               onDragOver={(e) => onDragOver?.(e, file)}
@@ -156,7 +156,7 @@ export function RecentFilesTable({
                   : "transparent",
               }}
               className={`folder-card-hover ${
-                tab === "my-files" && !isMultiSelectMode ? "dnd-draggable" : ""
+                tab === "my-files" ? "dnd-draggable" : ""
               } ${draggedItem?.id === file.id ? "dnd-dragged" : ""} ${
                 dragOverItem?.id === file.id ? "dnd-dragover" : ""
               }`}
