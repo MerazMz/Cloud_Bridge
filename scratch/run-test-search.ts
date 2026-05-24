@@ -74,7 +74,7 @@ async function testSearch() {
   console.log(`Testing search for query: "${query}"`);
 
   try {
-    const queryEmbedding = await SemanticSearchService.generateEmbedding({
+    const { embedding: queryEmbedding } = await SemanticSearchService.generateEmbedding({
       action: "text",
       query: query,
     });

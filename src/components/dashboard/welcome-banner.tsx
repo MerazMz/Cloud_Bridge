@@ -1,5 +1,5 @@
 "use client";
-
+import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
 
 interface WelcomeBannerProps {
@@ -53,7 +53,7 @@ export function WelcomeBanner({
       <div className="animate-fade-in" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1.25rem", width: "100%", position: "relative", zIndex: 20 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
           <h1 style={{ fontSize: "1.55rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.03em" }}>
-            Good morning, {userName}
+            Welcome Back, {userName}
           </h1>
           <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", fontWeight: 500 }}>
             {tab === "dashboard" && "Here's what's happening with your cloud storage today."}
@@ -337,17 +337,18 @@ export function WelcomeBanner({
               >
                 Start Uploading
               </button>
-              <button
+              <Link
+                href="/"
+                rel="noopener noreferrer"
                 className="btn btn-secondary"
                 style={{
                   padding: "0.55rem 1.15rem",
                   fontSize: "0.85rem",
                   fontWeight: 700,
                 }}
-                onClick={() => alert("Learn more documentation coming soon!")}
               >
                 Learn More
-              </button>
+              </Link>
             </div>
           </div>
 

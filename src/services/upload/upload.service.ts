@@ -26,12 +26,9 @@ class UploadService {
     fileName: string,
     fileSize: number,
     fileStream: ReadableStream<Uint8Array>,
-    parentId?: string,
-    shouldCompress?: boolean
+    parentId?: string
   ): Promise<string> {
-    const isVideo = fileName.toLowerCase().match(/\.(mp4|mov|webm|mkv|avi)$/i);
-    const compressMarker = (shouldCompress && isVideo) ? "compress_" : "";
-    const safeFileName = `${Date.now()}_${compressMarker}${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+    const safeFileName = `${Date.now()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
     const tempFilePath = path.join(this.tempDir, safeFileName);
 
     log.info("Initiating streaming upload pipeline to disk", { fileName, fileSize, tempFilePath, parentId });

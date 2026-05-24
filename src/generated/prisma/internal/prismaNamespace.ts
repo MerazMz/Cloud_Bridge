@@ -861,6 +861,7 @@ export const FileScalarFieldEnum = {
   isDeleted: 'isDeleted',
   isShared: 'isShared',
   isSecure: 'isSecure',
+  caption: 'caption',
   parentId: 'parentId',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'

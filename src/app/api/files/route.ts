@@ -2,8 +2,6 @@ import { successResponse, errorResponse } from "@/lib/api-response";
 import { getCurrentUserId } from "@/services/auth/auth.service";
 import { prisma } from "@/lib/prisma";
 import { createLogger } from "@/lib/logger";
-import { SemanticSearchService } from "@/services/semantic-search/semantic-search.service";
-
 const log = createLogger("API:files");
 
 export async function GET() {
@@ -12,9 +10,6 @@ export async function GET() {
     if (!userId) {
       return errorResponse("Not authenticated.", 401);
     }
-
-    // Preemptively ensure the semantic search server is running in the background
-    SemanticSearchService.ensureServerRunning().catch(() => {});
 
     const files = await prisma.file.findMany({
       where: { userId },
@@ -29,6 +24,7 @@ export async function GET() {
       mimeType: file.mimeType,
       isDeleted: file.isDeleted,
       createdAt: file.createdAt.toISOString(),
+      caption: file.caption,
     }));
 
     return successResponse(serializedFiles, "Files retrieved successfully.");

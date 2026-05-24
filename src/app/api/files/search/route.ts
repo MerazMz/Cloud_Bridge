@@ -12,10 +12,6 @@ export async function GET(req: NextRequest) {
     if (!userId) {
       return errorResponse("Not authenticated.", 401);
     }
-
-    // Ensure the persistent embedding server is running
-    SemanticSearchService.ensureServerRunning().catch(() => {});
-
     const { searchParams } = new URL(req.url);
     const query = searchParams.get("q");
     if (!query || !query.trim()) {

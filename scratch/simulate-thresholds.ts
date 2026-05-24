@@ -90,7 +90,7 @@ async function simulate() {
       console.log(`QUERY: "${query}"`);
       console.log(`========================================`);
 
-      const queryEmbedding = await SemanticSearchService.generateEmbedding({
+      const { embedding: queryEmbedding } = await SemanticSearchService.generateEmbedding({
         action: "text",
         query: query,
       });

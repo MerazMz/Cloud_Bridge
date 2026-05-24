@@ -56,6 +56,7 @@ model File {
   isDeleted         Boolean  @default(false)
   isShared          Boolean  @default(false)
   isSecure          Boolean  @default(false)  // Whether it's in the secure folder
+  caption           String?  @db.Text
   parentId          String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt

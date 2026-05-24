@@ -3,7 +3,7 @@
 import type { SVGProps } from "react"
 import { useEffect, useState } from "react"
 
-type SafariMode = "default" | "simple"
+type SafariMode = "default" | "simple" | "dark" | "light"
 
 export interface SafariProps extends SVGProps<SVGSVGElement> {
   url?: string
@@ -74,7 +74,7 @@ export function Safari({
             {url}
           </text>
         </g>
-        {mode === "default" ? (
+        {mode === "default" || mode === "light" || mode === "dark" ? (
           <>
             <g className="mix-blend-luminosity">
               <path

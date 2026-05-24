@@ -1,9 +1,9 @@
-import { execFile, spawn } from "child_process";
 import path from "path";
 import fs from "fs/promises";
 import os from "os";
 import { prisma } from "@/lib/prisma";
 import { createLogger } from "@/lib/logger";
+import { getEnv } from "@/lib/env";
 import { getClientForUser, downloadFileFromTelegram } from "@/services/telegram/telegram.service";
 
 const log = createLogger("SemanticSearchService");
@@ -16,170 +16,83 @@ interface EmbedOptions {
 }
 
 export class SemanticSearchService {
-  private static serverStarting = false;
-  private static serverRunning = false;
-
-  private static async getPythonExecutable(): Promise<string> {
-    const parts1 = ["semantic_search", ".venv", "bin", "python3"];
-    const parts2 = ["semantic_search", ".venv", "bin", "python"];
-    const venvPath = path.join(process.cwd(), ...parts1);
-    const venvPathAlt = path.join(process.cwd(), ...parts2);
-    try {
-      await fs.access(venvPath);
-      return venvPath;
-    } catch {}
-    try {
-      await fs.access(venvPathAlt);
-      return venvPathAlt;
-    } catch {}
-    return "python3";
-  }
-
-  public static async ensureServerRunning(): Promise<void> {
-    if (this.serverRunning || this.serverStarting) return;
-    this.serverStarting = true;
-
-    try {
-      // Perform a quick health check to see if the server is already running
-      const response = await fetch("http://127.0.0.1:5001/embed", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "text",
-          query: "ping",
-        }),
-        signal: AbortSignal.timeout(200), // Quick timeout
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success) {
-          log.info("CLIP Python server is already running and responsive.");
-          this.serverRunning = true;
-          this.serverStarting = false;
-          return;
-        }
-      }
-    } catch (err: any) {
-      log.debug("CLIP Python server not responding to ping, will attempt to spawn.", { message: err.message });
-    }
-    try {
-      log.info("Attempting to start CLIP Python embedding server in the background...");
-      const scriptParts = ["semantic_search", "server.py"];
-      const scriptPath = path.join(process.cwd(), ...scriptParts);
-      const pythonPath = await this.getPythonExecutable();
-      
-      // Spawn background detached server process
-      const serverProcess = spawn(pythonPath, [scriptPath, "--port", "5001"], {
-        detached: true,
-        stdio: "ignore",
-      });
-      serverProcess.unref();
-      log.info("CLIP Python embedding server spawned in the background using executable: " + pythonPath);
-    } catch (err: any) {
-      log.error("Failed to spawn CLIP Python embedding server", { error: err.message });
-    } finally {
-      // Cooldown to prevent multiple spawn attempts in quick succession
-      setTimeout(() => {
-        this.serverStarting = false;
-      }, 5000);
-    }
-  }
-
   /**
-   * Spawns the python3 embed.py script to generate a normalized CLIP embedding vector.
+   * Generates a normalized CLIP embedding vector using the Hugging Face Space API.
    */
-  static async generateEmbedding(options: EmbedOptions): Promise<number[]> {
+  /**
+   * Generates a normalized CLIP embedding vector and optional BLIP caption using the Hugging Face Space API.
+   */
+  static async generateEmbedding(options: EmbedOptions): Promise<{ embedding: number[]; caption?: string }> {
     const cliAction = options.action === "file" ? "text" : options.action;
     const query = options.action === "file" ? (options.filename || "") : (options.query || "");
 
-    // Preemptively ensure the server is running (non-blocking)
-    this.ensureServerRunning().catch(() => {});
+    const env = getEnv();
+    const searchUrl = env.SEMANTIC_SEARCH_URL || "https://bhawya12-clip-space-api.hf.space/embed";
 
-    // 1. Try querying the persistent local server
+    // Read the file and convert it to Base64 if a filepath is provided
+    let fileData: string | undefined = undefined;
+    if (options.filepath) {
+      try {
+        const buffer = await fs.readFile(options.filepath);
+        fileData = buffer.toString("base64");
+      } catch (err: any) {
+        log.warn("Failed to read file for base64 encoding", { filepath: options.filepath, error: err.message });
+      }
+    }
+
     try {
-      const response = await fetch("http://127.0.0.1:5001/embed", {
+      log.debug("Sending embedding request to server", { url: searchUrl, action: cliAction, filename: options.filename });
+      const response = await fetch(searchUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: cliAction,
           filepath: options.filepath,
           filename: options.filename,
+          fileData,
           query,
         }),
-        signal: AbortSignal.timeout(1500), // Max 1.5 seconds wait time
+        signal: AbortSignal.timeout(30000), // Allow 30 seconds for remote Space API wakeup or video frame extraction
       });
 
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success && result.embedding) {
-          log.debug("Generated embedding using persistent server successfully.");
-          this.serverRunning = true;
-          return result.embedding;
-        }
+      if (!response.ok) {
+        const errText = await response.text().catch(() => "");
+        throw new Error(`HTTP error ${response.status}: ${errText}`);
       }
-    } catch (fetchErr: any) {
-      log.debug("CLIP Python server not active or failed, falling back to CLI.", { message: fetchErr.message });
-      this.serverRunning = false;
-      // Self-heal: Start the background server so next query is fast
-      this.ensureServerRunning().catch(() => {});
+
+      const result = await response.json();
+      if (!result.success || !result.embedding) {
+        throw new Error(result.error || "No embedding in API response");
+      }
+
+      log.debug("Generated embedding successfully from server", { url: searchUrl, hasCaption: !!result.caption });
+      return {
+        embedding: result.embedding,
+        caption: result.caption,
+      };
+    } catch (err: any) {
+      log.error("Failed to generate CLIP embedding", err, { url: searchUrl });
+      throw err;
     }
-
-    // 2. Fallback: Spawn CLI process if server is down/unresponsive
-    return new Promise(async (resolve, reject) => {
-      try {
-        const pythonPath = await this.getPythonExecutable();
-        const scriptParts = ["semantic_search", "embed.py"];
-        const scriptPath = path.join(process.cwd(), ...scriptParts);
-        const args: string[] = [scriptPath, "--action", cliAction];
-
-        if (options.filepath && options.action !== "file") {
-          args.push("--filepath", options.filepath);
-        }
-        if (options.filename) {
-          args.push("--filename", options.filename);
-        }
-        if (options.action === "file") {
-          args.push("--query", options.filename || "");
-        } else if (options.query) {
-          args.push("--query", options.query);
-        }
-
-        log.warn("Spawning CLI backup for CLIP Python embedding generator", { args });
-
-        // Max buffer size set to 10MB to handle large outputs if needed (though vector JSON is small)
-        execFile(pythonPath, args, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
-          if (error) {
-            log.error("CLIP CLI execution failed. Stderr:", { stderr });
-            return reject(new Error(`CLIP Embedding generation failed: ${error.message}`));
-          }
-
-          try {
-            const result = JSON.parse(stdout.trim());
-            if (!result.success || !result.embedding) {
-              return reject(new Error(result.error || "No embedding in CLI output"));
-            }
-            resolve(result.embedding);
-          } catch (parseError) {
-            log.error("Failed to parse CLIP CLI output", { stdout, stderr });
-            reject(new Error(`Failed to parse CLIP CLI output: ${(parseError as Error).message}`));
-          }
-        });
-      } catch (err: any) {
-        reject(err);
-      }
-    });
   }
 
   /**
-   * Saves or updates a file's embedding in PostgreSQL.
+   * Saves or updates a file's embedding and optional BLIP caption in PostgreSQL.
    */
-  static async saveEmbedding(fileId: string, userId: string, embedding: number[]): Promise<void> {
-    await prisma.fileEmbedding.upsert({
-      where: { fileId },
-      update: { embedding },
-      create: { fileId, userId, embedding },
-    });
+  static async saveEmbedding(fileId: string, userId: string, embedding: number[], caption?: string): Promise<void> {
+    await prisma.$transaction([
+      prisma.fileEmbedding.upsert({
+        where: { fileId },
+        update: { embedding },
+        create: { fileId, userId, embedding },
+      }),
+      ...(caption ? [
+        prisma.file.update({
+          where: { id: fileId },
+          data: { caption },
+        })
+      ] : [])
+    ]);
   }
 
   /**
@@ -234,7 +147,7 @@ export class SemanticSearchService {
       });
 
       if (!user || !user.storageChannelId || !user.storageChannelAccessHash) {
-        log.error("Missing storage channel configuration for user", { userId });
+        log.error("Missing storage channel configuration for user", undefined, { userId });
         throw new Error("Missing storage channel configuration.");
       }
 
@@ -242,7 +155,7 @@ export class SemanticSearchService {
       try {
         client = await getClientForUser(userId);
       } catch (clientErr: any) {
-        log.error("Failed to get Telegram client for backfill", { userId, error: clientErr.message });
+        log.error("Failed to get Telegram client for backfill", clientErr, { userId });
         throw clientErr;
       }
 
@@ -276,22 +189,21 @@ export class SemanticSearchService {
           }
 
           // 4. Generate embedding
-          const embedding = await this.generateEmbedding({
+          const { embedding, caption } = await this.generateEmbedding({
             action,
             filepath: tempFilePath,
             filename: file.fileName,
           });
 
           // 5. Save embedding
-          await this.saveEmbedding(file.id, userId, embedding);
+          await this.saveEmbedding(file.id, userId, embedding, caption);
           processedCount++;
           log.info("Successfully backfilled embedding for file", { fileId: file.id });
         } catch (err: any) {
           failedCount++;
-          log.error("Failed to backfill embedding for file", {
+          log.error("Failed to backfill embedding for file", err, {
             fileId: file.id,
             fileName: file.fileName,
-            error: err.message,
           });
         } finally {
           if (tempFilePath) {
@@ -309,7 +221,7 @@ export class SemanticSearchService {
       try {
         await client.disconnect();
       } catch (discErr: any) {
-        log.error("Failed to disconnect client after backfill", { error: discErr.message });
+        log.error("Failed to disconnect client after backfill", discErr);
       }
 
       return {
@@ -395,7 +307,7 @@ export class SemanticSearchService {
   ): Promise<{ threshold: number; files: any[] }> {
     // 1. Generate text embedding for the search query
     log.info("Generating CLIP embedding for search query", { query });
-    const queryEmbedding = await this.generateEmbedding({
+    const { embedding: queryEmbedding } = await this.generateEmbedding({
       action: "text",
       query: query.trim(),
     });
@@ -420,6 +332,7 @@ export class SemanticSearchService {
       return { threshold: 0.23, files: [] };
     }
 
+    const queryLower = query.trim().toLowerCase();
     // 3. Compute dot product similarity (equivalent to cosine similarity for normalized L2 vectors)
     const matches = userEmbeddings
       .filter((emb) => !emb.file.isDeleted)
@@ -427,8 +340,16 @@ export class SemanticSearchService {
         let similarity = 0;
         try {
           similarity = this.dotProduct(queryEmbedding, emb.embedding);
+
+          // Hybrid Search: Apply a similarity boost (+0.15) if the query matches the BLIP caption
+          if (emb.file.caption) {
+            const captionLower = emb.file.caption.toLowerCase();
+            if (captionLower.includes(queryLower)) {
+              similarity = Math.min(1.0, similarity + 0.15);
+            }
+          }
         } catch (err: any) {
-          log.error("Dot product calculation failed", { fileId: emb.fileId, error: err.message });
+          log.error("Dot product calculation failed", err, { fileId: emb.fileId });
         }
         return {
           id: emb.file.id,
@@ -441,6 +362,7 @@ export class SemanticSearchService {
           parentId: emb.file.parentId,
           createdAt: emb.file.createdAt.toISOString(),
           updatedAt: emb.file.updatedAt.toISOString(),
+          caption: emb.file.caption,
           similarity,
         };
       });

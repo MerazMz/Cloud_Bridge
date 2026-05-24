@@ -20,11 +20,15 @@ import { VideoThumbnail } from "@/components/dashboard/video-thumbnail";
 import { DocumentViewer } from "@/components/dashboard/document-viewer";
 import { DirectorySelectorModal } from "@/components/dashboard/directory-selector-modal";
 import { ConfirmationModal } from "@/components/dashboard/confirmation-modal";
+import { OrganizerView } from "@/components/dashboard/organizer-view";
+import { FavoritesView } from "@/components/dashboard/favorites-view";
+import { SharedView } from "@/components/dashboard/shared-view";
+import { TrashView } from "@/components/dashboard/trash-view";
 
 import { DBFile } from "@/types/file.types";
 
 export interface NotificationItem {
-  id: stringi have made some changes ;
+  id: string;
   type: "success" | "cancel" | "error" | "info";
   message: string;
   timestamp: Date;
@@ -135,6 +139,7 @@ function DashboardContent() {
   useEffect(() => {
     compressVideoRef.current = compressVideo;
   }, [compressVideo]);
+
   const [allFiles, setAllFiles] = useState<DBFile[]>([]);
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -310,7 +315,7 @@ function DashboardContent() {
         visibleFiles = activeFiles.filter((f) => f.isShared);
       } else if (tab === "trash") {
         visibleFiles = files.filter((f) => f.isDeleted);
-      } else if (tab === "folders") {
+      } else if (tab === "organizer") {
         if (selectedFolderCategory === "images") visibleFiles = activeFiles.filter(f => classifyFile(f.mimeType, f.fileName) === "image");
         else if (selectedFolderCategory === "documents") visibleFiles = activeFiles.filter(f => classifyFile(f.mimeType, f.fileName) === "document");
         else if (selectedFolderCategory === "media") visibleFiles = activeFiles.filter(f => classifyFile(f.mimeType, f.fileName) === "media");
@@ -457,6 +462,7 @@ function DashboardContent() {
 
   // Initialize theme and local storage states
   useEffect(() => {
+    let observer: MutationObserver | undefined;
     if (typeof window !== "undefined") {
       const savedTheme = localStorage.getItem("theme");
       if (savedTheme === "dark") {
@@ -469,6 +475,15 @@ function DashboardContent() {
         const hasDarkClass = document.documentElement.classList.contains("dark");
         setDarkMode(hasDarkClass);
       }
+
+      // Listen to class changes on documentElement to stay synchronized
+      observer = new MutationObserver(() => {
+        setDarkMode(document.documentElement.classList.contains("dark"));
+      });
+      observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["class"],
+      });
 
       // Load favorites
       try {
@@ -501,17 +516,48 @@ function DashboardContent() {
         }
       } catch {}
     }
+
+    return () => {
+      if (observer) {
+        observer.disconnect();
+      }
+    };
   }, []);
 
   const toggleDarkMode = () => {
     const nextDark = !darkMode;
-    setDarkMode(nextDark);
-    if (nextDark) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
+
+    const applyTheme = () => {
+      setDarkMode(nextDark);
+      if (nextDark) {
+        document.documentElement.classList.add("dark");
+        localStorage.setItem("theme", "dark");
+      } else {
+        document.documentElement.classList.remove("dark");
+        localStorage.setItem("theme", "light");
+      }
+    };
+
+    if (typeof document.startViewTransition !== "function") {
+      applyTheme();
+      return;
+    }
+
+    const root = document.documentElement;
+    root.dataset.magicuiThemeVt = "active";
+
+    const transition = document.startViewTransition(() => {
+      applyTheme();
+    });
+
+    const cleanup = () => {
+      delete root.dataset.magicuiThemeVt;
+    };
+
+    if (typeof transition?.finished?.finally === "function") {
+      transition.finished.finally(cleanup);
     } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
+      cleanup();
     }
   };
 
@@ -1078,6 +1124,7 @@ function DashboardContent() {
       if (itemParentId) {
         headers["x-parent-id"] = itemParentId;
       }
+
       if (compressVideoRef.current) {
         headers["x-compress-video"] = "true";
       }
@@ -1273,9 +1320,6 @@ function DashboardContent() {
       formData.append("file", file);
 
       const headers: Record<string, string> = {};
-      if (compressVideoRef.current) {
-        headers["x-compress-video"] = "true";
-      }
 
       const responseData = await uploadFileWithXhr({
         url: "/api/files/upload",
@@ -2488,6 +2532,25 @@ function DashboardContent() {
       );
     }
 
+    // Specific custom image branding for Audio files
+    if (
+      nameLower.endsWith(".mp3") ||
+      nameLower.endsWith(".wav") ||
+      nameLower.endsWith(".ogg") ||
+      nameLower.endsWith(".m4a") ||
+      nameLower.endsWith(".aac") ||
+      nameLower.endsWith(".flac") ||
+      mimeLower.startsWith("audio/")
+    ) {
+      return (
+        <img
+          src="/audio.png"
+          alt="Audio"
+          style={{ width: "1.25rem", height: "1.25rem", objectFit: "contain", display: "block" }}
+        />
+      );
+    }
+
     switch (category) {
       case "image":
         return (
@@ -2594,6 +2657,7 @@ function DashboardContent() {
     visibleFiles = activeFiles.filter((f) => f.isShared);
   } else if (tab === "trash") {
     visibleFiles = allFiles.filter((f) => f.isDeleted);
+  } else if (tab === "organizer") {
   } else if (tab === "secure-folder") {
     visibleFiles = activeFiles;
   } else if (tab === "folders") {
@@ -3061,281 +3125,23 @@ function DashboardContent() {
         </>
       )}
 
-      {/* Folders Tab Directory Breakdowns */}
-      {tab === "folders" && !selectedFolderCategory && (
-        <section className="animate-fade-in" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1.25rem", width: "100%" }}>
-          {/* Images Folder */}
-          <div
-            onClick={() => setSelectedFolderCategory("images")}
-            className="glass-card card-hover"
-            style={{
-              padding: "1.65rem 1.5rem",
-              borderRadius: "16px",
-              border: "1px solid var(--border-default)",
-              background: "var(--bg-card)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.85rem",
-              cursor: "pointer",
-              transition: "all 0.22s ease",
-              boxShadow: "var(--glass-shadow)"
-            }}
-          >
-            <div
-              style={{
-                width: "42px",
-                height: "42px",
-                borderRadius: "12px",
-                background: "linear-gradient(135deg, rgba(255, 168, 0, 0.06) 0%, rgba(255, 122, 0, 0.12) 100%)",
-                border: "1px solid rgba(255, 168, 0, 0.15)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFA800" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                <circle cx="8.5" cy="8.5" r="1.5" />
-                <polyline points="21 15 16 10 5 21" />
-              </svg>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-              <span style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.015em" }}>Images</span>
-              <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 500 }}>{imagesCount} files • {formatBytes(imagesSize)}</span>
-            </div>
-          </div>
-
-          {/* Documents Folder */}
-          <div
-            onClick={() => setSelectedFolderCategory("documents")}
-            className="glass-card card-hover"
-            style={{
-              padding: "1.65rem 1.5rem",
-              borderRadius: "16px",
-              border: "1px solid var(--border-default)",
-              background: "var(--bg-card)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.85rem",
-              cursor: "pointer",
-              transition: "all 0.22s ease",
-              boxShadow: "var(--glass-shadow)"
-            }}
-          >
-            <div
-              style={{
-                width: "42px",
-                height: "42px",
-                borderRadius: "12px",
-                background: "linear-gradient(135deg, rgba(255, 168, 0, 0.06) 0%, rgba(255, 122, 0, 0.12) 100%)",
-                border: "1px solid rgba(255, 168, 0, 0.15)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFA800" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-                <line x1="16" y1="13" x2="8" y2="13" />
-                <line x1="16" y1="17" x2="8" y2="17" />
-              </svg>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-              <span style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.015em" }}>Documents</span>
-              <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 500 }}>{documentsCount} files • {formatBytes(documentsSize)}</span>
-            </div>
-          </div>
-
-          {/* Media Folder */}
-          <div
-            onClick={() => setSelectedFolderCategory("media")}
-            className="glass-card card-hover"
-            style={{
-              padding: "1.65rem 1.5rem",
-              borderRadius: "16px",
-              border: "1px solid var(--border-default)",
-              background: "var(--bg-card)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.85rem",
-              cursor: "pointer",
-              transition: "all 0.22s ease",
-              boxShadow: "var(--glass-shadow)"
-            }}
-          >
-            <div
-              style={{
-                width: "42px",
-                height: "42px",
-                borderRadius: "12px",
-                background: "linear-gradient(135deg, rgba(255, 168, 0, 0.06) 0%, rgba(255, 122, 0, 0.12) 100%)",
-                border: "1px solid rgba(255, 168, 0, 0.15)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFA800" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="23 7 16 12 23 17 23 7" />
-                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-              </svg>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-              <span style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.015em" }}>Audio & Video</span>
-              <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 500 }}>{mediaFiles.length} files • {formatBytes(mediaSize)}</span>
-            </div>
-          </div>
-
-          {/* Others Folder */}
-          <div
-            onClick={() => setSelectedFolderCategory("others")}
-            className="glass-card card-hover"
-            style={{
-              padding: "1.65rem 1.5rem",
-              borderRadius: "16px",
-              border: "1px solid var(--border-default)",
-              background: "var(--bg-card)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.85rem",
-              cursor: "pointer",
-              transition: "all 0.22s ease",
-              boxShadow: "var(--glass-shadow)"
-            }}
-          >
-            <div
-              style={{
-                width: "42px",
-                height: "42px",
-                borderRadius: "12px",
-                background: "linear-gradient(135deg, rgba(255, 168, 0, 0.06) 0%, rgba(255, 122, 0, 0.12) 100%)",
-                border: "1px solid rgba(255, 168, 0, 0.15)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFA800" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="16.5" y1="9.4" x2="7.5" y2="4.21" />
-                <polygon points="12 22.08 12 12 3 6.92 3 17.08 12 22.08" />
-                <polygon points="12 22.08 21 17.08 21 6.92 12 12 12 22.08" />
-                <polygon points="12 12 21 6.92 12 1.84 3 6.92 12 12" />
-              </svg>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-              <span style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.015em" }}>Archives & Others</span>
-              <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 500 }}>{archiveFiles.length + otherFiles.length} files • {formatBytes(otherSize)}</span>
-            </div>
-          </div>
-        </section>
+      {/* Organizer Tab Directory Breakdowns */}
+      {tab === "organizer" && !selectedFolderCategory && (
+        <OrganizerView
+          imagesCount={imagesCount}
+          imagesSize={imagesSize}
+          documentsCount={documentsCount}
+          documentsSize={documentsSize}
+          mediaCount={mediaFiles.length}
+          mediaSize={mediaSize}
+          othersCount={archiveFiles.length + otherFiles.length}
+          othersSize={otherSize}
+          formatBytes={formatBytes}
+          setSelectedFolderCategory={setSelectedFolderCategory}
+        />
       )}
 
-      {/* Settings Tab Panel */}
-      {tab === "settings" && (
-        <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: "1.5rem", width: "100%", maxWidth: "800px", margin: "0 auto", marginTop: "1rem" }}>
-          {/* Header Description */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", marginBottom: "0.5rem" }}>
-            <h2 style={{ fontSize: "1.4rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.03em", margin: 0 }}>
-              Portal Preferences
-            </h2>
-            <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", fontWeight: 500, margin: 0 }}>
-              Customize your security, upload, and media optimization parameters.
-            </p>
-          </div>
 
-          {/* Section: Upload Settings */}
-          <div
-            className="glass-card"
-            style={{
-              padding: "1.5rem",
-              borderRadius: "16px",
-              border: "1px solid var(--border-default)",
-              background: "var(--bg-card)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "1.25rem",
-              boxShadow: "var(--glass-shadow)"
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", borderBottom: "1px solid var(--border-subtle)", paddingBottom: "0.75rem" }}>
-              <div style={{ fontSize: "1.25rem" }}>⚙️</div>
-              <h3 style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text-primary)", margin: 0, letterSpacing: "-0.015em" }}>
-                Upload & Optimization
-              </h3>
-            </div>
-
-            {/* Optimization Toggle Row */}
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1.5rem" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", flex: 1 }}>
-                <span style={{ fontSize: "0.88rem", fontWeight: 700, color: "var(--text-primary)", letterSpacing: "-0.01em" }}>
-                  Compress video before uploading
-                </span>
-                <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 500, lineHeight: "1.45" }}>
-                  When enabled, CloudBridge will execute background hardware-accelerated video video compression (H.264 / Constant Rate Factor 23) upon server ingestion. This reduces sizes by up to 80% and accelerates transfer times, preserving original visual detail and copy-preserving your audio feeds perfectly!
-                </span>
-              </div>
-
-              {/* iOS Premium Toggle Switch */}
-              <button
-                onClick={() => handleToggleCompressVideo(!compressVideo)}
-                style={{
-                  width: "48px",
-                  height: "26px",
-                  borderRadius: "9999px",
-                  background: compressVideo ? "#F59E0B" : "rgba(100, 116, 139, 0.15)",
-                  border: "1px solid rgba(255,255,255,0.05)",
-                  position: "relative",
-                  cursor: "pointer",
-                  transition: "background-color 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
-                  padding: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  flexShrink: 0,
-                  boxShadow: compressVideo ? "0 2px 8px rgba(245, 158, 11, 0.3)" : "none",
-                }}
-              >
-                <div
-                  style={{
-                    width: "20px",
-                    height: "20px",
-                    borderRadius: "50%",
-                    background: "#ffffff",
-                    position: "absolute",
-                    left: compressVideo ? "24px" : "3px",
-                    transition: "left 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
-                    boxShadow: "0 2px 4px rgba(0,0,0,0.2)"
-                  }}
-                />
-              </button>
-            </div>
-          </div>
-          
-          {/* Quick FAQ / Specs Card */}
-          <div
-            className="glass-card"
-            style={{
-              padding: "1.15rem",
-              borderRadius: "14px",
-              border: "1px solid var(--border-default)",
-              background: "rgba(15, 23, 42, 0.15)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.5rem"
-            }}
-          >
-            <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Technical Specifications
-            </span>
-            <ul style={{ margin: 0, paddingLeft: "1.1rem", display: "flex", flexDirection: "column", gap: "0.35rem", fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 500 }}>
-              <li>Uses premium <strong>H.264 High-Profile</strong> video encoders maximizing compatibility with Telegram's Web Player.</li>
-              <li>Preserves original frame rates, scaling resolutions, and aspect ratios.</li>
-              <li>Strict <strong>zero-reencode audio copy</strong> preserves your master tracks completely.</li>
-              <li>Runs fully multi-threaded asynchronously on the server to prevent browser thread locking.</li>
-            </ul>
-          </div>
-        </div>
-      )}
 
       {/* Uploads Tab Dedicated Sequential Queue Dashboard */}
       {tab === "uploads" && (
@@ -3850,7 +3656,13 @@ function DashboardContent() {
       )}
 
       {/* Main Files Table Card */}
-      {!(tab === "folders" && !selectedFolderCategory) && tab !== "uploads" && tab !== "settings" && !(tab === "secure-folder" && !isSecureUnlocked) && (
+      {tab !== "settings" &&
+        tab !== "uploads" &&
+        tab !== "favorites" &&
+        tab !== "shared" &&
+        tab !== "trash" &&
+        !(tab === "organizer" && !selectedFolderCategory) &&
+        !(tab === "secure-folder" && !isSecureUnlocked) && (
         <div
           className="glass-card animate-slide-up"
           style={{
@@ -3868,7 +3680,7 @@ function DashboardContent() {
           {/* Header title */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem", flexWrap: "wrap", gap: "0.75rem" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-              {tab === "folders" && selectedFolderCategory && (
+              {tab === "organizer" && selectedFolderCategory && (
                 <button
                   onClick={() => setSelectedFolderCategory(null)}
                   style={{
@@ -5406,6 +5218,147 @@ function DashboardContent() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Decoupled Tab Views */}
+      {tab === "favorites" && (
+        <FavoritesView
+          files={finalFilteredFiles}
+          darkMode={darkMode}
+          viewMode={viewMode}
+          setViewMode={setViewMode}
+          gridSize={gridSize}
+          setGridSize={setGridSize}
+          favorites={favorites}
+          selectedActiveIds={selectedActiveIds}
+          isMultiSelectMode={isMultiSelectMode}
+          activeMenuFileId={activeMenuFileId}
+          setActiveMenuFileId={setActiveMenuFileId}
+          hoveredFileId={hoveredFileId}
+          setHoveredFileId={setHoveredFileId}
+          draggedItem={draggedItem}
+          dragOverItem={dragOverItem}
+          mergingSourceId={mergingSourceId}
+          mergingTargetId={mergingTargetId}
+          filesLoading={filesLoading}
+          semanticSearchLoading={semanticSearchLoading}
+          searchTerm={searchTerm}
+          handleToggleSelectActive={handleToggleSelectActive}
+          setActiveDocumentViewerFileId={setActiveDocumentViewerFileId}
+          handleDragStart={handleDragStart}
+          handleDragEnd={handleDragEnd}
+          handleDragOver={handleDragOver}
+          handleDragLeave={handleDragLeave}
+          handleItemDrop={handleItemDrop}
+          handleToggleFavorite={handleToggleFavorite}
+          handleInitiateRename={(file) => {
+            setRenameModalFile(file);
+            setRenameModalValue(file.fileName);
+          }}
+          handleOpenShareModal={(file) => handleShare(file.id)}
+          handleMoveToTrash={handleMoveToTrash}
+          handleDeleteFile={(id) => { const f = files.find(x => x.id === id); if (f) handlePermanentDelete(f.id, f.fileName); }}
+          handleRestoreFile={(id) => { const f = files.find(x => x.id === id); if (f) handleRestoreFromTrash(f); }}
+          handleRevokeShare={handleRevokeShare}
+          setIsMultiSelectMode={setIsMultiSelectMode}
+          setSelectedActiveIds={setSelectedActiveIds}
+          setSelectedDetailsFile={setSelectedDetailsFile}
+          handleDownload={handleDownload}
+        />
+      )}
+
+      {tab === "shared" && (
+        <SharedView
+          files={finalFilteredFiles}
+          darkMode={darkMode}
+          viewMode={viewMode}
+          setViewMode={setViewMode}
+          gridSize={gridSize}
+          setGridSize={setGridSize}
+          favorites={favorites}
+          selectedActiveIds={selectedActiveIds}
+          isMultiSelectMode={isMultiSelectMode}
+          activeMenuFileId={activeMenuFileId}
+          setActiveMenuFileId={setActiveMenuFileId}
+          hoveredFileId={hoveredFileId}
+          setHoveredFileId={setHoveredFileId}
+          draggedItem={draggedItem}
+          dragOverItem={dragOverItem}
+          mergingSourceId={mergingSourceId}
+          mergingTargetId={mergingTargetId}
+          filesLoading={filesLoading}
+          semanticSearchLoading={semanticSearchLoading}
+          searchTerm={searchTerm}
+          handleToggleSelectActive={handleToggleSelectActive}
+          setActiveDocumentViewerFileId={setActiveDocumentViewerFileId}
+          handleDragStart={handleDragStart}
+          handleDragEnd={handleDragEnd}
+          handleDragOver={handleDragOver}
+          handleDragLeave={handleDragLeave}
+          handleItemDrop={handleItemDrop}
+          handleToggleFavorite={handleToggleFavorite}
+          handleInitiateRename={(file) => {
+            setRenameModalFile(file);
+            setRenameModalValue(file.fileName);
+          }}
+          handleOpenShareModal={(file) => handleShare(file.id)}
+          handleMoveToTrash={handleMoveToTrash}
+          handleDeleteFile={(id) => { const f = files.find(x => x.id === id); if (f) handlePermanentDelete(f.id, f.fileName); }}
+          handleRestoreFile={(id) => { const f = files.find(x => x.id === id); if (f) handleRestoreFromTrash(f); }}
+          handleRevokeShare={handleRevokeShare}
+          setIsMultiSelectMode={setIsMultiSelectMode}
+          setSelectedActiveIds={setSelectedActiveIds}
+          setSelectedDetailsFile={setSelectedDetailsFile}
+          handleDownload={handleDownload}
+        />
+      )}
+
+      {tab === "trash" && (
+        <TrashView
+          files={finalFilteredFiles}
+          darkMode={darkMode}
+          viewMode={viewMode}
+          setViewMode={setViewMode}
+          gridSize={gridSize}
+          setGridSize={setGridSize}
+          favorites={favorites}
+          selectedActiveIds={selectedActiveIds}
+          isMultiSelectMode={isMultiSelectMode}
+          activeMenuFileId={activeMenuFileId}
+          setActiveMenuFileId={setActiveMenuFileId}
+          hoveredFileId={hoveredFileId}
+          setHoveredFileId={setHoveredFileId}
+          draggedItem={draggedItem}
+          dragOverItem={dragOverItem}
+          mergingSourceId={mergingSourceId}
+          mergingTargetId={mergingTargetId}
+          filesLoading={filesLoading}
+          semanticSearchLoading={semanticSearchLoading}
+          searchTerm={searchTerm}
+          isBatchDeleting={isBatchDeleting}
+          handleEmptyTrash={handleEmptyTrash}
+          handleToggleSelectActive={handleToggleSelectActive}
+          setActiveDocumentViewerFileId={setActiveDocumentViewerFileId}
+          handleDragStart={handleDragStart}
+          handleDragEnd={handleDragEnd}
+          handleDragOver={handleDragOver}
+          handleDragLeave={handleDragLeave}
+          handleItemDrop={handleItemDrop}
+          handleToggleFavorite={handleToggleFavorite}
+          handleInitiateRename={(file) => {
+            setRenameModalFile(file);
+            setRenameModalValue(file.fileName);
+          }}
+          handleOpenShareModal={(file) => handleShare(file.id)}
+          handleMoveToTrash={handleMoveToTrash}
+          handleDeleteFile={(id) => { const f = files.find(x => x.id === id); if (f) handlePermanentDelete(f.id, f.fileName); }}
+          handleRestoreFile={(id) => { const f = files.find(x => x.id === id); if (f) handleRestoreFromTrash(f); }}
+          handleRevokeShare={handleRevokeShare}
+          setIsMultiSelectMode={setIsMultiSelectMode}
+          setSelectedActiveIds={setSelectedActiveIds}
+          setSelectedDetailsFile={setSelectedDetailsFile}
+          handleDownload={handleDownload}
+        />
       )}
 
       {/* Global Bottom Sticky Upload Progress HUD Widget */}

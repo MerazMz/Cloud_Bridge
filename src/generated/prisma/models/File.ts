@@ -46,6 +46,7 @@ export type FileMinAggregateOutputType = {
   isDeleted: boolean | null
   isShared: boolean | null
   isSecure: boolean | null
+  caption: string | null
   parentId: string | null
   createdAt: Date | null
   updatedAt: Date | null
@@ -61,6 +62,7 @@ export type FileMaxAggregateOutputType = {
   isDeleted: boolean | null
   isShared: boolean | null
   isSecure: boolean | null
+  caption: string | null
   parentId: string | null
   createdAt: Date | null
   updatedAt: Date | null
@@ -76,6 +78,7 @@ export type FileCountAggregateOutputType = {
   isDeleted: number
   isShared: number
   isSecure: number
+  caption: number
   parentId: number
   createdAt: number
   updatedAt: number
@@ -103,6 +106,7 @@ export type FileMinAggregateInputType = {
   isDeleted?: true
   isShared?: true
   isSecure?: true
+  caption?: true
   parentId?: true
   createdAt?: true
   updatedAt?: true
@@ -118,6 +122,7 @@ export type FileMaxAggregateInputType = {
   isDeleted?: true
   isShared?: true
   isSecure?: true
+  caption?: true
   parentId?: true
   createdAt?: true
   updatedAt?: true
@@ -133,6 +138,7 @@ export type FileCountAggregateInputType = {
   isDeleted?: true
   isShared?: true
   isSecure?: true
+  caption?: true
   parentId?: true
   createdAt?: true
   updatedAt?: true
@@ -235,6 +241,7 @@ export type FileGroupByOutputType = {
   isDeleted: boolean
   isShared: boolean
   isSecure: boolean
+  caption: string | null
   parentId: string | null
   createdAt: Date
   updatedAt: Date
@@ -273,6 +280,7 @@ export type FileWhereInput = {
   isDeleted?: Prisma.BoolFilter<"File"> | boolean
   isShared?: Prisma.BoolFilter<"File"> | boolean
   isSecure?: Prisma.BoolFilter<"File"> | boolean
+  caption?: Prisma.StringNullableFilter<"File"> | string | null
   parentId?: Prisma.StringNullableFilter<"File"> | string | null
   createdAt?: Prisma.DateTimeFilter<"File"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"File"> | Date | string
@@ -292,6 +300,7 @@ export type FileOrderByWithRelationInput = {
   isDeleted?: Prisma.SortOrder
   isShared?: Prisma.SortOrder
   isSecure?: Prisma.SortOrder
+  caption?: Prisma.SortOrderInput | Prisma.SortOrder
   parentId?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -314,6 +323,7 @@ export type FileWhereUniqueInput = Prisma.AtLeast<{
   isDeleted?: Prisma.BoolFilter<"File"> | boolean
   isShared?: Prisma.BoolFilter<"File"> | boolean
   isSecure?: Prisma.BoolFilter<"File"> | boolean
+  caption?: Prisma.StringNullableFilter<"File"> | string | null
   parentId?: Prisma.StringNullableFilter<"File"> | string | null
   createdAt?: Prisma.DateTimeFilter<"File"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"File"> | Date | string
@@ -333,6 +343,7 @@ export type FileOrderByWithAggregationInput = {
   isDeleted?: Prisma.SortOrder
   isShared?: Prisma.SortOrder
   isSecure?: Prisma.SortOrder
+  caption?: Prisma.SortOrderInput | Prisma.SortOrder
   parentId?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -356,6 +367,7 @@ export type FileScalarWhereWithAggregatesInput = {
   isDeleted?: Prisma.BoolWithAggregatesFilter<"File"> | boolean
   isShared?: Prisma.BoolWithAggregatesFilter<"File"> | boolean
   isSecure?: Prisma.BoolWithAggregatesFilter<"File"> | boolean
+  caption?: Prisma.StringNullableWithAggregatesFilter<"File"> | string | null
   parentId?: Prisma.StringNullableWithAggregatesFilter<"File"> | string | null
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"File"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"File"> | Date | string
@@ -370,6 +382,7 @@ export type FileCreateInput = {
   isDeleted?: boolean
   isShared?: boolean
   isSecure?: boolean
+  caption?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   user: Prisma.UserCreateNestedOneWithoutFilesInput
@@ -388,6 +401,7 @@ export type FileUncheckedCreateInput = {
   isDeleted?: boolean
   isShared?: boolean
   isSecure?: boolean
+  caption?: string | null
   parentId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -404,6 +418,7 @@ export type FileUpdateInput = {
   isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isShared?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isSecure?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  caption?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   user?: Prisma.UserUpdateOneRequiredWithoutFilesNestedInput
@@ -422,6 +437,7 @@ export type FileUncheckedUpdateInput = {
   isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isShared?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isSecure?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  caption?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -439,6 +455,7 @@ export type FileCreateManyInput = {
   isDeleted?: boolean
   isShared?: boolean
   isSecure?: boolean
+  caption?: string | null
   parentId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -453,6 +470,7 @@ export type FileUpdateManyMutationInput = {
   isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isShared?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isSecure?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  caption?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -467,6 +485,7 @@ export type FileUncheckedUpdateManyInput = {
   isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isShared?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isSecure?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  caption?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -497,6 +516,7 @@ export type FileCountOrderByAggregateInput = {
   isDeleted?: Prisma.SortOrder
   isShared?: Prisma.SortOrder
   isSecure?: Prisma.SortOrder
+  caption?: Prisma.SortOrder
   parentId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -517,6 +537,7 @@ export type FileMaxOrderByAggregateInput = {
   isDeleted?: Prisma.SortOrder
   isShared?: Prisma.SortOrder
   isSecure?: Prisma.SortOrder
+  caption?: Prisma.SortOrder
   parentId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -532,6 +553,7 @@ export type FileMinOrderByAggregateInput = {
   isDeleted?: Prisma.SortOrder
   isShared?: Prisma.SortOrder
   isSecure?: Prisma.SortOrder
+  caption?: Prisma.SortOrder
   parentId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -682,6 +704,7 @@ export type FileCreateWithoutUserInput = {
   isDeleted?: boolean
   isShared?: boolean
   isSecure?: boolean
+  caption?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   parent?: Prisma.FileCreateNestedOneWithoutChildrenInput
@@ -698,6 +721,7 @@ export type FileUncheckedCreateWithoutUserInput = {
   isDeleted?: boolean
   isShared?: boolean
   isSecure?: boolean
+  caption?: string | null
   parentId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -744,6 +768,7 @@ export type FileScalarWhereInput = {
   isDeleted?: Prisma.BoolFilter<"File"> | boolean
   isShared?: Prisma.BoolFilter<"File"> | boolean
   isSecure?: Prisma.BoolFilter<"File"> | boolean
+  caption?: Prisma.StringNullableFilter<"File"> | string | null
   parentId?: Prisma.StringNullableFilter<"File"> | string | null
   createdAt?: Prisma.DateTimeFilter<"File"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"File"> | Date | string
@@ -758,6 +783,7 @@ export type FileCreateWithoutChildrenInput = {
   isDeleted?: boolean
   isShared?: boolean
   isSecure?: boolean
+  caption?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   user: Prisma.UserCreateNestedOneWithoutFilesInput
@@ -775,6 +801,7 @@ export type FileUncheckedCreateWithoutChildrenInput = {
   isDeleted?: boolean
   isShared?: boolean
   isSecure?: boolean
+  caption?: string | null
   parentId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -795,6 +822,7 @@ export type FileCreateWithoutParentInput = {
   isDeleted?: boolean
   isShared?: boolean
   isSecure?: boolean
+  caption?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   user: Prisma.UserCreateNestedOneWithoutFilesInput
@@ -812,6 +840,7 @@ export type FileUncheckedCreateWithoutParentInput = {
   isDeleted?: boolean
   isShared?: boolean
   isSecure?: boolean
+  caption?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   children?: Prisma.FileUncheckedCreateNestedManyWithoutParentInput
@@ -848,6 +877,7 @@ export type FileUpdateWithoutChildrenInput = {
   isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isShared?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isSecure?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  caption?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   user?: Prisma.UserUpdateOneRequiredWithoutFilesNestedInput
@@ -865,6 +895,7 @@ export type FileUncheckedUpdateWithoutChildrenInput = {
   isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isShared?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isSecure?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  caption?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -896,6 +927,7 @@ export type FileCreateWithoutEmbeddingInput = {
   isDeleted?: boolean
   isShared?: boolean
   isSecure?: boolean
+  caption?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   user: Prisma.UserCreateNestedOneWithoutFilesInput
@@ -913,6 +945,7 @@ export type FileUncheckedCreateWithoutEmbeddingInput = {
   isDeleted?: boolean
   isShared?: boolean
   isSecure?: boolean
+  caption?: string | null
   parentId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -944,6 +977,7 @@ export type FileUpdateWithoutEmbeddingInput = {
   isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isShared?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isSecure?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  caption?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   user?: Prisma.UserUpdateOneRequiredWithoutFilesNestedInput
@@ -961,6 +995,7 @@ export type FileUncheckedUpdateWithoutEmbeddingInput = {
   isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isShared?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isSecure?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  caption?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -976,6 +1011,7 @@ export type FileCreateManyUserInput = {
   isDeleted?: boolean
   isShared?: boolean
   isSecure?: boolean
+  caption?: string | null
   parentId?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -990,6 +1026,7 @@ export type FileUpdateWithoutUserInput = {
   isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isShared?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isSecure?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  caption?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   parent?: Prisma.FileUpdateOneWithoutChildrenNestedInput
@@ -1006,6 +1043,7 @@ export type FileUncheckedUpdateWithoutUserInput = {
   isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isShared?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isSecure?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  caption?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -1022,6 +1060,7 @@ export type FileUncheckedUpdateManyWithoutUserInput = {
   isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isShared?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isSecure?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  caption?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -1037,6 +1076,7 @@ export type FileCreateManyParentInput = {
   isDeleted?: boolean
   isShared?: boolean
   isSecure?: boolean
+  caption?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -1050,6 +1090,7 @@ export type FileUpdateWithoutParentInput = {
   isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isShared?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isSecure?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  caption?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   user?: Prisma.UserUpdateOneRequiredWithoutFilesNestedInput
@@ -1067,6 +1108,7 @@ export type FileUncheckedUpdateWithoutParentInput = {
   isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isShared?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isSecure?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  caption?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   children?: Prisma.FileUncheckedUpdateManyWithoutParentNestedInput
@@ -1083,6 +1125,7 @@ export type FileUncheckedUpdateManyWithoutParentInput = {
   isDeleted?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isShared?: Prisma.BoolFieldUpdateOperationsInput | boolean
   isSecure?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  caption?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -1128,6 +1171,7 @@ export type FileSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = r
   isDeleted?: boolean
   isShared?: boolean
   isSecure?: boolean
+  caption?: boolean
   parentId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
@@ -1148,6 +1192,7 @@ export type FileSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensio
   isDeleted?: boolean
   isShared?: boolean
   isSecure?: boolean
+  caption?: boolean
   parentId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
@@ -1165,6 +1210,7 @@ export type FileSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensio
   isDeleted?: boolean
   isShared?: boolean
   isSecure?: boolean
+  caption?: boolean
   parentId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
@@ -1182,12 +1228,13 @@ export type FileSelectScalar = {
   isDeleted?: boolean
   isShared?: boolean
   isSecure?: boolean
+  caption?: boolean
   parentId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }
 
-export type FileOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "userId" | "telegramMessageId" | "fileName" | "fileSize" | "mimeType" | "isDeleted" | "isShared" | "isSecure" | "parentId" | "createdAt" | "updatedAt", ExtArgs["result"]["file"]>
+export type FileOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "userId" | "telegramMessageId" | "fileName" | "fileSize" | "mimeType" | "isDeleted" | "isShared" | "isSecure" | "caption" | "parentId" | "createdAt" | "updatedAt", ExtArgs["result"]["file"]>
 export type FileInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
   parent?: boolean | Prisma.File$parentArgs<ExtArgs>
@@ -1222,6 +1269,7 @@ export type $FilePayload<ExtArgs extends runtime.Types.Extensions.InternalArgs =
     isDeleted: boolean
     isShared: boolean
     isSecure: boolean
+    caption: string | null
     parentId: string | null
     createdAt: Date
     updatedAt: Date
@@ -1661,6 +1709,7 @@ export interface FileFieldRefs {
   readonly isDeleted: Prisma.FieldRef<"File", 'Boolean'>
   readonly isShared: Prisma.FieldRef<"File", 'Boolean'>
   readonly isSecure: Prisma.FieldRef<"File", 'Boolean'>
+  readonly caption: Prisma.FieldRef<"File", 'String'>
   readonly parentId: Prisma.FieldRef<"File", 'String'>
   readonly createdAt: Prisma.FieldRef<"File", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"File", 'DateTime'>

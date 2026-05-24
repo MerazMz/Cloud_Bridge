@@ -10,6 +10,7 @@ export interface DBFile {
   isDeleted?: boolean;
   isShared?: boolean;
   isSecure?: boolean;
+  caption?: string;
   createdAt: string;
   similarity?: number;
   parentId?: string | null;
