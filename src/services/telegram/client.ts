@@ -1,6 +1,7 @@
 import { TelegramClient } from "telegram";
 import { ConnectionTCPObfuscated } from "telegram/network";
 import { StringSession } from "telegram/sessions";
+import { LogLevel } from "telegram/extensions/Logger";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("TelegramClient");
@@ -31,6 +32,9 @@ export function createTelegramClient(sessionString = ""): TelegramClient {
     retryDelay: 1000,
     autoReconnect: true,
   });
+
+  // Mute GramJS verbose connection/ping socket traffic, only logging critical errors
+  client.setLogLevel(LogLevel.ERROR);
 
   log.debug("TelegramClient created", { hasSession: sessionString.length > 0 });
 

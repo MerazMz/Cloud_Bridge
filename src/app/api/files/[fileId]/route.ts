@@ -202,6 +202,8 @@ export async function GET(
 
     const activeClient = client;
 
+    let isCancelled = false;
+
     // Construct high-performance progressive chunked stream
     const stream = new ReadableStream({
       async start(controller) {
@@ -209,24 +211,35 @@ export async function GET(
           if (!activeClient) {
             throw new Error("Telegram client was not properly initialized.");
           }
+          const requestSizeVal = 512 * 1024;
+          const totalChunksToDownload = Math.ceil(chunkSize / requestSizeVal);
+
           for await (const chunk of activeClient.iterDownload({
             file: fileLocation,
             offset: bigInt(startByte),
-            limit: chunkSize, // Limit takes standard number in GramJS iterDownload options
-            requestSize: 512 * 1024, // 512KB chunks for dynamic loading responsiveness
+            limit: totalChunksToDownload,
+            requestSize: requestSizeVal,
             dcId: mediaDcId, // Route download directly to correct Data Center
           })) {
+            if (isCancelled) break;
             controller.enqueue(chunk);
           }
-          controller.close();
+          if (!isCancelled) {
+            controller.close();
+          }
           await disconnectClient();
         } catch (err) {
-          log.error("Error occurred while feeding download stream from Telegram", err);
-          controller.error(err);
+          if (!isCancelled) {
+            log.error("Error occurred while feeding download stream from Telegram", err);
+            try {
+              controller.error(err);
+            } catch (_) {}
+          }
           await disconnectClient();
         }
       },
       async cancel(reason) {
+        isCancelled = true;
         log.info("Download stream canceled by browser request context", { fileId, reason });
         await disconnectClient();
       }

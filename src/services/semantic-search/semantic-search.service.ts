@@ -71,7 +71,7 @@ export class SemanticSearchService {
         caption: result.caption,
       };
     } catch (err: any) {
-      log.error("Failed to generate CLIP embedding", { url: searchUrl, error: err.message });
+      log.error("Failed to generate CLIP embedding", err, { url: searchUrl });
       throw err;
     }
   }
@@ -147,7 +147,7 @@ export class SemanticSearchService {
       });
 
       if (!user || !user.storageChannelId || !user.storageChannelAccessHash) {
-        log.error("Missing storage channel configuration for user", { userId });
+        log.error("Missing storage channel configuration for user", undefined, { userId });
         throw new Error("Missing storage channel configuration.");
       }
 
@@ -155,7 +155,7 @@ export class SemanticSearchService {
       try {
         client = await getClientForUser(userId);
       } catch (clientErr: any) {
-        log.error("Failed to get Telegram client for backfill", { userId, error: clientErr.message });
+        log.error("Failed to get Telegram client for backfill", clientErr, { userId });
         throw clientErr;
       }
 
@@ -201,10 +201,9 @@ export class SemanticSearchService {
           log.info("Successfully backfilled embedding for file", { fileId: file.id });
         } catch (err: any) {
           failedCount++;
-          log.error("Failed to backfill embedding for file", {
+          log.error("Failed to backfill embedding for file", err, {
             fileId: file.id,
             fileName: file.fileName,
-            error: err.message,
           });
         } finally {
           if (tempFilePath) {
@@ -222,7 +221,7 @@ export class SemanticSearchService {
       try {
         await client.disconnect();
       } catch (discErr: any) {
-        log.error("Failed to disconnect client after backfill", { error: discErr.message });
+        log.error("Failed to disconnect client after backfill", discErr);
       }
 
       return {
@@ -349,7 +348,7 @@ export class SemanticSearchService {
             }
           }
         } catch (err: any) {
-          log.error("Dot product calculation failed", { fileId: emb.fileId, error: err.message });
+          log.error("Dot product calculation failed", err, { fileId: emb.fileId });
         }
         return {
           id: emb.file.id,

@@ -27,13 +27,38 @@ export default function VerifyOtpPage() {
 
   const toggleTheme = () => {
     const nextDark = !isDark;
-    setIsDark(nextDark);
-    if (nextDark) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
+
+    const applyTheme = () => {
+      setIsDark(nextDark);
+      if (nextDark) {
+        document.documentElement.classList.add("dark");
+        localStorage.setItem("theme", "dark");
+      } else {
+        document.documentElement.classList.remove("dark");
+        localStorage.setItem("theme", "light");
+      }
+    };
+
+    if (typeof document.startViewTransition !== "function") {
+      applyTheme();
+      return;
+    }
+
+    const root = document.documentElement;
+    root.dataset.magicuiThemeVt = "active";
+
+    const transition = document.startViewTransition(() => {
+      applyTheme();
+    });
+
+    const cleanup = () => {
+      delete root.dataset.magicuiThemeVt;
+    };
+
+    if (typeof transition?.finished?.finally === "function") {
+      transition.finished.finally(cleanup);
     } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
+      cleanup();
     }
   };
 
@@ -113,7 +138,6 @@ export default function VerifyOtpPage() {
         background: isDark
           ? "linear-gradient(135deg, #09090B 0%, #121215 100%)"
           : "linear-gradient(135deg, #FFFDF9 0%, #FFF8EA 100%)",
-        transition: "background 0.3s ease",
         overflowX: "hidden",
       }}
     >

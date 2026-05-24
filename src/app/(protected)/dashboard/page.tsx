@@ -20,6 +20,10 @@ import { VideoThumbnail } from "@/components/dashboard/video-thumbnail";
 import { DocumentViewer } from "@/components/dashboard/document-viewer";
 import { DirectorySelectorModal } from "@/components/dashboard/directory-selector-modal";
 import { ConfirmationModal } from "@/components/dashboard/confirmation-modal";
+import { OrganizerView } from "@/components/dashboard/organizer-view";
+import { FavoritesView } from "@/components/dashboard/favorites-view";
+import { SharedView } from "@/components/dashboard/shared-view";
+import { TrashView } from "@/components/dashboard/trash-view";
 
 import { DBFile } from "@/types/file.types";
 
@@ -282,7 +286,7 @@ function DashboardContent() {
         visibleFiles = activeFiles.filter((f) => f.isShared);
       } else if (tab === "trash") {
         visibleFiles = files.filter((f) => f.isDeleted);
-      } else if (tab === "folders") {
+      } else if (tab === "organizer") {
         if (selectedFolderCategory === "images") visibleFiles = activeFiles.filter(f => classifyFile(f.mimeType, f.fileName) === "image");
         else if (selectedFolderCategory === "documents") visibleFiles = activeFiles.filter(f => classifyFile(f.mimeType, f.fileName) === "document");
         else if (selectedFolderCategory === "media") visibleFiles = activeFiles.filter(f => classifyFile(f.mimeType, f.fileName) === "media");
@@ -488,13 +492,38 @@ function DashboardContent() {
 
   const toggleDarkMode = () => {
     const nextDark = !darkMode;
-    setDarkMode(nextDark);
-    if (nextDark) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
+
+    const applyTheme = () => {
+      setDarkMode(nextDark);
+      if (nextDark) {
+        document.documentElement.classList.add("dark");
+        localStorage.setItem("theme", "dark");
+      } else {
+        document.documentElement.classList.remove("dark");
+        localStorage.setItem("theme", "light");
+      }
+    };
+
+    if (typeof document.startViewTransition !== "function") {
+      applyTheme();
+      return;
+    }
+
+    const root = document.documentElement;
+    root.dataset.magicuiThemeVt = "active";
+
+    const transition = document.startViewTransition(() => {
+      applyTheme();
+    });
+
+    const cleanup = () => {
+      delete root.dataset.magicuiThemeVt;
+    };
+
+    if (typeof transition?.finished?.finally === "function") {
+      transition.finished.finally(cleanup);
     } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
+      cleanup();
     }
   };
 
@@ -605,31 +634,31 @@ function DashboardContent() {
     }
   }, [user]);
 
-  const handleSyncSemanticSearch = async (force = false) => {
-    if (isSyncing) return;
-    setIsSyncing(true);
-    showToast("info", force ? "Forcing generation of all image embeddings in background..." : "Triggering semantic search sync for previous image files...");
-    try {
-      const res = await fetch("/api/files/backfill", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ force }),
-      });
-      const json = await res.json();
-      if (json.success) {
-        showToast("success", "Semantic search sync successfully started in background.");
-        addNotification("success", force ? "Full embedding re-generation started." : "Missing image embedding backfill started.");
-      } else {
-        showToast("error", json.message || "Failed to trigger embedding sync.");
-      }
-    } catch (err: any) {
-      showToast("error", err.message || "An error occurred while connecting to backfill service.");
-    } finally {
-      setIsSyncing(false);
-    }
-  };
+  // const handleSyncSemanticSearch = async (force = false) => {
+  //   if (isSyncing) return;
+  //   setIsSyncing(true);
+  //   showToast("info", force ? "Forcing generation of all image embeddings in background..." : "Triggering semantic search sync for previous image files...");
+  //   try {
+  //     const res = await fetch("/api/files/backfill", {
+  //       method: "POST",
+  //       headers: {
+  //         "Content-Type": "application/json",
+  //       },
+  //       body: JSON.stringify({ force }),
+  //     });
+  //     const json = await res.json();
+  //     if (json.success) {
+  //       showToast("success", "Semantic search sync successfully started in background.");
+  //       addNotification("success", force ? "Full embedding re-generation started." : "Missing image embedding backfill started.");
+  //     } else {
+  //       showToast("error", json.message || "Failed to trigger embedding sync.");
+  //     }
+  //   } catch (err: any) {
+  //     showToast("error", err.message || "An error occurred while connecting to backfill service.");
+  //   } finally {
+  //     setIsSyncing(false);
+  //   }
+  // };
 
   // Sequential Upload Queue Runner Effect Hook
   useEffect(() => {
@@ -2071,7 +2100,7 @@ function DashboardContent() {
     visibleFiles = activeFiles.filter((f) => f.isShared);
   } else if (tab === "trash") {
     visibleFiles = allFiles.filter((f) => f.isDeleted);
-  } else if (tab === "folders") {
+  } else if (tab === "organizer") {
     if (selectedFolderCategory === "images") visibleFiles = imageFiles;
     else if (selectedFolderCategory === "documents") visibleFiles = documentFiles;
     else if (selectedFolderCategory === "media") visibleFiles = mediaFiles;
@@ -2467,7 +2496,7 @@ function DashboardContent() {
         isBannerVisible={isBannerVisible}
         handleCloseBanner={handleCloseBanner}
         onCreateFolderClick={() => setIsNewFolderModalOpen(true)}
-        onSyncClick={handleSyncSemanticSearch}
+        // onSyncClick={handleSyncSemanticSearch}
         isSyncing={isSyncing}
       />
 
@@ -2524,174 +2553,20 @@ function DashboardContent() {
         </>
       )}
 
-      {/* Folders Tab Directory Breakdowns */}
-      {tab === "folders" && !selectedFolderCategory && (
-        <section className="animate-fade-in" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1.25rem", width: "100%" }}>
-          {/* Images Folder */}
-          <div
-            onClick={() => setSelectedFolderCategory("images")}
-            className="glass-card card-hover"
-            style={{
-              padding: "1.65rem 1.5rem",
-              borderRadius: "16px",
-              border: "1px solid var(--border-default)",
-              background: "var(--bg-card)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.85rem",
-              cursor: "pointer",
-              transition: "all 0.22s ease",
-              boxShadow: "var(--glass-shadow)"
-            }}
-          >
-            <div
-              style={{
-                width: "42px",
-                height: "42px",
-                borderRadius: "12px",
-                background: "linear-gradient(135deg, rgba(255, 168, 0, 0.06) 0%, rgba(255, 122, 0, 0.12) 100%)",
-                border: "1px solid rgba(255, 168, 0, 0.15)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFA800" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                <circle cx="8.5" cy="8.5" r="1.5" />
-                <polyline points="21 15 16 10 5 21" />
-              </svg>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-              <span style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.015em" }}>Images</span>
-              <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 500 }}>{imagesCount} files • {formatBytes(imagesSize)}</span>
-            </div>
-          </div>
-
-          {/* Documents Folder */}
-          <div
-            onClick={() => setSelectedFolderCategory("documents")}
-            className="glass-card card-hover"
-            style={{
-              padding: "1.65rem 1.5rem",
-              borderRadius: "16px",
-              border: "1px solid var(--border-default)",
-              background: "var(--bg-card)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.85rem",
-              cursor: "pointer",
-              transition: "all 0.22s ease",
-              boxShadow: "var(--glass-shadow)"
-            }}
-          >
-            <div
-              style={{
-                width: "42px",
-                height: "42px",
-                borderRadius: "12px",
-                background: "linear-gradient(135deg, rgba(255, 168, 0, 0.06) 0%, rgba(255, 122, 0, 0.12) 100%)",
-                border: "1px solid rgba(255, 168, 0, 0.15)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFA800" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-                <line x1="16" y1="13" x2="8" y2="13" />
-                <line x1="16" y1="17" x2="8" y2="17" />
-              </svg>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-              <span style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.015em" }}>Documents</span>
-              <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 500 }}>{documentsCount} files • {formatBytes(documentsSize)}</span>
-            </div>
-          </div>
-
-          {/* Media Folder */}
-          <div
-            onClick={() => setSelectedFolderCategory("media")}
-            className="glass-card card-hover"
-            style={{
-              padding: "1.65rem 1.5rem",
-              borderRadius: "16px",
-              border: "1px solid var(--border-default)",
-              background: "var(--bg-card)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.85rem",
-              cursor: "pointer",
-              transition: "all 0.22s ease",
-              boxShadow: "var(--glass-shadow)"
-            }}
-          >
-            <div
-              style={{
-                width: "42px",
-                height: "42px",
-                borderRadius: "12px",
-                background: "linear-gradient(135deg, rgba(255, 168, 0, 0.06) 0%, rgba(255, 122, 0, 0.12) 100%)",
-                border: "1px solid rgba(255, 168, 0, 0.15)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFA800" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="23 7 16 12 23 17 23 7" />
-                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-              </svg>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-              <span style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.015em" }}>Audio & Video</span>
-              <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 500 }}>{mediaFiles.length} files • {formatBytes(mediaSize)}</span>
-            </div>
-          </div>
-
-          {/* Others Folder */}
-          <div
-            onClick={() => setSelectedFolderCategory("others")}
-            className="glass-card card-hover"
-            style={{
-              padding: "1.65rem 1.5rem",
-              borderRadius: "16px",
-              border: "1px solid var(--border-default)",
-              background: "var(--bg-card)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.85rem",
-              cursor: "pointer",
-              transition: "all 0.22s ease",
-              boxShadow: "var(--glass-shadow)"
-            }}
-          >
-            <div
-              style={{
-                width: "42px",
-                height: "42px",
-                borderRadius: "12px",
-                background: "linear-gradient(135deg, rgba(255, 168, 0, 0.06) 0%, rgba(255, 122, 0, 0.12) 100%)",
-                border: "1px solid rgba(255, 168, 0, 0.15)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFA800" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="16.5" y1="9.4" x2="7.5" y2="4.21" />
-                <polygon points="12 22.08 12 12 3 6.92 3 17.08 12 22.08" />
-                <polygon points="12 22.08 21 17.08 21 6.92 12 12 12 22.08" />
-                <polygon points="12 12 21 6.92 12 1.84 3 6.92 12 12" />
-              </svg>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-              <span style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.015em" }}>Archives & Others</span>
-              <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 500 }}>{archiveFiles.length + otherFiles.length} files • {formatBytes(otherSize)}</span>
-            </div>
-          </div>
-        </section>
+      {/* Organizer Tab Directory Breakdowns */}
+      {tab === "organizer" && !selectedFolderCategory && (
+        <OrganizerView
+          imagesCount={imagesCount}
+          imagesSize={imagesSize}
+          documentsCount={documentsCount}
+          documentsSize={documentsSize}
+          mediaCount={mediaFiles.length}
+          mediaSize={mediaSize}
+          othersCount={archiveFiles.length + otherFiles.length}
+          othersSize={otherSize}
+          formatBytes={formatBytes}
+          setSelectedFolderCategory={setSelectedFolderCategory}
+        />
       )}
 
 
@@ -3019,7 +2894,11 @@ function DashboardContent() {
       )}
 
       {/* Main Files Table Card */}
-      {!(tab === "folders" && !selectedFolderCategory) && tab !== "uploads" && (
+      {!(tab === "organizer" && !selectedFolderCategory) &&
+        tab !== "uploads" &&
+        tab !== "favorites" &&
+        tab !== "shared" &&
+        tab !== "trash" && (
         <div
           className="glass-card animate-slide-up"
           style={{
@@ -3037,7 +2916,7 @@ function DashboardContent() {
           {/* Header title */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem", flexWrap: "wrap", gap: "0.75rem" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-              {tab === "folders" && selectedFolderCategory && (
+              {tab === "organizer" && selectedFolderCategory && (
                 <button
                   onClick={() => setSelectedFolderCategory(null)}
                   style={{
@@ -4323,6 +4202,147 @@ function DashboardContent() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Decoupled Tab Views */}
+      {tab === "favorites" && (
+        <FavoritesView
+          files={finalFilteredFiles}
+          darkMode={darkMode}
+          viewMode={viewMode}
+          setViewMode={setViewMode}
+          gridSize={gridSize}
+          setGridSize={setGridSize}
+          favorites={favorites}
+          selectedActiveIds={selectedActiveIds}
+          isMultiSelectMode={isMultiSelectMode}
+          activeMenuFileId={activeMenuFileId}
+          setActiveMenuFileId={setActiveMenuFileId}
+          hoveredFileId={hoveredFileId}
+          setHoveredFileId={setHoveredFileId}
+          draggedItem={draggedItem}
+          dragOverItem={dragOverItem}
+          mergingSourceId={mergingSourceId}
+          mergingTargetId={mergingTargetId}
+          filesLoading={filesLoading}
+          semanticSearchLoading={semanticSearchLoading}
+          searchTerm={searchTerm}
+          handleToggleSelectActive={handleToggleSelectActive}
+          setActiveDocumentViewerFileId={setActiveDocumentViewerFileId}
+          handleDragStart={handleDragStart}
+          handleDragEnd={handleDragEnd}
+          handleDragOver={handleDragOver}
+          handleDragLeave={handleDragLeave}
+          handleItemDrop={handleItemDrop}
+          handleToggleFavorite={handleToggleFavorite}
+          handleInitiateRename={(file) => {
+            setRenameModalFile(file);
+            setRenameModalValue(file.fileName);
+          }}
+          handleOpenShareModal={(file) => handleShare(file.id)}
+          handleMoveToTrash={handleMoveToTrash}
+          handleDeleteFile={(id) => { const f = files.find(x => x.id === id); if (f) handlePermanentDelete(f.id, f.fileName); }}
+          handleRestoreFile={(id) => { const f = files.find(x => x.id === id); if (f) handleRestoreFromTrash(f); }}
+          handleRevokeShare={handleRevokeShare}
+          setIsMultiSelectMode={setIsMultiSelectMode}
+          setSelectedActiveIds={setSelectedActiveIds}
+          setSelectedDetailsFile={setSelectedDetailsFile}
+          handleDownload={handleDownload}
+        />
+      )}
+
+      {tab === "shared" && (
+        <SharedView
+          files={finalFilteredFiles}
+          darkMode={darkMode}
+          viewMode={viewMode}
+          setViewMode={setViewMode}
+          gridSize={gridSize}
+          setGridSize={setGridSize}
+          favorites={favorites}
+          selectedActiveIds={selectedActiveIds}
+          isMultiSelectMode={isMultiSelectMode}
+          activeMenuFileId={activeMenuFileId}
+          setActiveMenuFileId={setActiveMenuFileId}
+          hoveredFileId={hoveredFileId}
+          setHoveredFileId={setHoveredFileId}
+          draggedItem={draggedItem}
+          dragOverItem={dragOverItem}
+          mergingSourceId={mergingSourceId}
+          mergingTargetId={mergingTargetId}
+          filesLoading={filesLoading}
+          semanticSearchLoading={semanticSearchLoading}
+          searchTerm={searchTerm}
+          handleToggleSelectActive={handleToggleSelectActive}
+          setActiveDocumentViewerFileId={setActiveDocumentViewerFileId}
+          handleDragStart={handleDragStart}
+          handleDragEnd={handleDragEnd}
+          handleDragOver={handleDragOver}
+          handleDragLeave={handleDragLeave}
+          handleItemDrop={handleItemDrop}
+          handleToggleFavorite={handleToggleFavorite}
+          handleInitiateRename={(file) => {
+            setRenameModalFile(file);
+            setRenameModalValue(file.fileName);
+          }}
+          handleOpenShareModal={(file) => handleShare(file.id)}
+          handleMoveToTrash={handleMoveToTrash}
+          handleDeleteFile={(id) => { const f = files.find(x => x.id === id); if (f) handlePermanentDelete(f.id, f.fileName); }}
+          handleRestoreFile={(id) => { const f = files.find(x => x.id === id); if (f) handleRestoreFromTrash(f); }}
+          handleRevokeShare={handleRevokeShare}
+          setIsMultiSelectMode={setIsMultiSelectMode}
+          setSelectedActiveIds={setSelectedActiveIds}
+          setSelectedDetailsFile={setSelectedDetailsFile}
+          handleDownload={handleDownload}
+        />
+      )}
+
+      {tab === "trash" && (
+        <TrashView
+          files={finalFilteredFiles}
+          darkMode={darkMode}
+          viewMode={viewMode}
+          setViewMode={setViewMode}
+          gridSize={gridSize}
+          setGridSize={setGridSize}
+          favorites={favorites}
+          selectedActiveIds={selectedActiveIds}
+          isMultiSelectMode={isMultiSelectMode}
+          activeMenuFileId={activeMenuFileId}
+          setActiveMenuFileId={setActiveMenuFileId}
+          hoveredFileId={hoveredFileId}
+          setHoveredFileId={setHoveredFileId}
+          draggedItem={draggedItem}
+          dragOverItem={dragOverItem}
+          mergingSourceId={mergingSourceId}
+          mergingTargetId={mergingTargetId}
+          filesLoading={filesLoading}
+          semanticSearchLoading={semanticSearchLoading}
+          searchTerm={searchTerm}
+          isBatchDeleting={isBatchDeleting}
+          handleEmptyTrash={handleEmptyTrash}
+          handleToggleSelectActive={handleToggleSelectActive}
+          setActiveDocumentViewerFileId={setActiveDocumentViewerFileId}
+          handleDragStart={handleDragStart}
+          handleDragEnd={handleDragEnd}
+          handleDragOver={handleDragOver}
+          handleDragLeave={handleDragLeave}
+          handleItemDrop={handleItemDrop}
+          handleToggleFavorite={handleToggleFavorite}
+          handleInitiateRename={(file) => {
+            setRenameModalFile(file);
+            setRenameModalValue(file.fileName);
+          }}
+          handleOpenShareModal={(file) => handleShare(file.id)}
+          handleMoveToTrash={handleMoveToTrash}
+          handleDeleteFile={(id) => { const f = files.find(x => x.id === id); if (f) handlePermanentDelete(f.id, f.fileName); }}
+          handleRestoreFile={(id) => { const f = files.find(x => x.id === id); if (f) handleRestoreFromTrash(f); }}
+          handleRevokeShare={handleRevokeShare}
+          setIsMultiSelectMode={setIsMultiSelectMode}
+          setSelectedActiveIds={setSelectedActiveIds}
+          setSelectedDetailsFile={setSelectedDetailsFile}
+          handleDownload={handleDownload}
+        />
       )}
 
       {/* Global Bottom Sticky Upload Progress HUD Widget */}

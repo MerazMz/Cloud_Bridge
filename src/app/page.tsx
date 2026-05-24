@@ -7,6 +7,7 @@ import Iphone15Pro from "@/components/ui/iphone";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import Marquee from "react-fast-marquee";
 import { CountingNumber } from "@/components/animate-ui/primitives/texts/counting-number";
+import { Meteors } from "@/components/ui/meteors"
 
 const faqs = [
   {
@@ -1325,8 +1326,10 @@ export default function RootPage() {
           zIndex: 5,
           position: "relative",
           transition: "all 0.4s ease",
+          overflow: "hidden"
         }}
       >
+        <Meteors  />
         {/* Soft yellow ambient glow in the footer background */}
         <div
           style={{
