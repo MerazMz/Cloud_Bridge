@@ -405,6 +405,7 @@ function DashboardContent() {
     const handleGlobalClick = () => {
       setActiveMenuFileId(null);
       setActiveUploadFolderMenuId(null);
+      setIsCurrentFolderUploadMenuOpen(false);
     };
     window.addEventListener("click", handleGlobalClick);
     return () => window.removeEventListener("click", handleGlobalClick);
@@ -435,6 +436,7 @@ function DashboardContent() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const [activeUploadFolderMenuId, setActiveUploadFolderMenuId] = useState<string | null>(null);
+  const [isCurrentFolderUploadMenuOpen, setIsCurrentFolderUploadMenuOpen] = useState(false);
 
   // Initialize theme and local storage states
   useEffect(() => {
@@ -3389,6 +3391,117 @@ function DashboardContent() {
                       </button>
                     </div>
                   ))}
+
+                  {currentFolderId !== null && (
+                    <div style={{ position: "relative", display: "inline-block", marginLeft: "0.3rem" }} onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          setIsCurrentFolderUploadMenuOpen(!isCurrentFolderUploadMenuOpen);
+                        }}
+                        style={{
+                          background: darkMode ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
+                          border: "none",
+                          borderRadius: "50%",
+                          width: "24px",
+                          height: "24px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          cursor: "pointer",
+                          color: darkMode ? "#ffffff" : "#0f172a",
+                          fontSize: "1rem",
+                          fontWeight: "bold",
+                          transition: "all 0.2s ease",
+                        }}
+                        className="dropdown-item-hover"
+                        title="Upload inside this folder"
+                      >
+                        +
+                      </button>
+
+                      {isCurrentFolderUploadMenuOpen && (
+                        <div
+                          className="glass-card"
+                          style={{
+                            position: "absolute",
+                            left: 0,
+                            top: "100%",
+                            zIndex: 100,
+                            background: darkMode ? "#1e293b" : "#ffffff",
+                            border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
+                            borderRadius: "8px",
+                            padding: "0.35rem",
+                            minWidth: "125px",
+                            boxShadow: darkMode ? "0 10px 15px -3px rgba(0, 0, 0, 0.3)" : "0 10px 15px -3px rgba(15, 23, 42, 0.08)",
+                            marginTop: "4px",
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsCurrentFolderUploadMenuOpen(false);
+                              setUploadTargetFolderId(currentFolderId);
+                              setTimeout(() => {
+                                fileInputRef.current?.click();
+                              }, 150);
+                            }}
+                            className="dropdown-item-hover"
+                            style={{
+                              width: "100%",
+                              textAlign: "left",
+                              background: "none",
+                              border: "none",
+                              color: darkMode ? "#ffffff" : "#0f172a",
+                              fontSize: "0.74rem",
+                              fontWeight: 700,
+                              padding: "0.45rem 0.65rem",
+                              borderRadius: "6px",
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0.4rem",
+                            }}
+                          >
+                            <span>📄</span>
+                            <span>Upload Files</span>
+                          </button>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsCurrentFolderUploadMenuOpen(false);
+                              setUploadTargetFolderId(currentFolderId);
+                              setTimeout(() => {
+                                folderInputRef.current?.click();
+                              }, 150);
+                            }}
+                            className="dropdown-item-hover"
+                            style={{
+                              width: "100%",
+                              textAlign: "left",
+                              background: "none",
+                              border: "none",
+                              color: darkMode ? "#ffffff" : "#0f172a",
+                              fontSize: "0.74rem",
+                              fontWeight: 700,
+                              padding: "0.45rem 0.65rem",
+                              borderRadius: "6px",
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0.4rem",
+                            }}
+                          >
+                            <span>📁</span>
+                            <span>Upload Folder</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <h3 style={{ fontSize: "0.98rem", fontWeight: 800, color: darkMode ? "#ffffff" : "#0f172a", letterSpacing: "-0.015em", textTransform: "capitalize" }}>
