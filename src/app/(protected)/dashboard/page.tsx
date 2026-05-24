@@ -94,6 +94,15 @@ function DashboardContent() {
     onCancel: () => void;
   } | null>(null);
 
+  // Settings Secure Folder Password States
+  const [settingsOldPassword, setSettingsOldPassword] = useState("");
+  const [settingsNewPassword, setSettingsNewPassword] = useState("");
+  const [settingsConfirmNewPassword, setSettingsConfirmNewPassword] = useState("");
+  const [settingsOtp, setSettingsOtp] = useState("");
+  const [settingsOtpSent, setSettingsOtpSent] = useState(false);
+  const [settingsIsLoading, setSettingsIsLoading] = useState(false);
+  const [settingsView, setSettingsView] = useState<"change" | "forgot">("change");
+
   // Sorting and Filtering States for My Files
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "largest" | "smallest">("newest");
   const [filterType, setFilterType] = useState<"all" | "image" | "document" | "media" | "archive" | "pdf" | "other">("all");
@@ -837,6 +846,91 @@ function DashboardContent() {
     setSecurePassword("");
     setSecurePasswordConfirm("");
     await handleSendSecureOtp();
+  };
+
+  const handleSettingsSendOtp = async () => {
+    setSettingsIsLoading(true);
+    try {
+      const res = await fetch("/api/auth/secure-folder/send-otp", { method: "POST" });
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", "OTP sent to your Telegram Saved Messages.");
+        setSettingsOtpSent(true);
+      } else {
+        showToast("error", json.message || "Failed to send OTP.");
+      }
+    } catch {
+      showToast("error", "An error occurred while sending OTP.");
+    } finally {
+      setSettingsIsLoading(false);
+    }
+  };
+
+  const handleSettingsResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (settingsNewPassword !== settingsConfirmNewPassword) {
+      showToast("error", "Passwords do not match.");
+      return;
+    }
+    setSettingsIsLoading(true);
+    try {
+      const res = await fetch("/api/auth/secure-folder/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ otp: settingsOtp, password: settingsNewPassword }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", "Secure password reset successfully!");
+        setSettingsNewPassword("");
+        setSettingsConfirmNewPassword("");
+        setSettingsOtp("");
+        setSettingsOtpSent(false);
+        setSettingsView("change");
+        setIsSecureUnlocked(true);
+        setHasSecurePassword(true);
+        fetchFiles(null);
+        fetchAllFiles();
+      } else {
+        showToast("error", json.message || "Failed to reset password.");
+      }
+    } catch {
+      showToast("error", "An error occurred during password reset.");
+    } finally {
+      setSettingsIsLoading(false);
+    }
+  };
+
+  const handleSettingsChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (settingsNewPassword !== settingsConfirmNewPassword) {
+      showToast("error", "New passwords do not match.");
+      return;
+    }
+    setSettingsIsLoading(true);
+    try {
+      const res = await fetch("/api/auth/secure-folder/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ oldPassword: settingsOldPassword, newPassword: settingsNewPassword }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", "Secure password updated successfully!");
+        setSettingsOldPassword("");
+        setSettingsNewPassword("");
+        setSettingsConfirmNewPassword("");
+        setIsSecureUnlocked(true);
+        fetchFiles(null);
+        fetchAllFiles();
+      } else {
+        showToast("error", json.message || "Failed to update password.");
+      }
+    } catch {
+      showToast("error", "An error occurred while changing password.");
+    } finally {
+      setSettingsIsLoading(false);
+    }
   };
 
   const promptSecurePassword = () => {
@@ -5359,6 +5453,238 @@ function DashboardContent() {
           setSelectedDetailsFile={setSelectedDetailsFile}
           handleDownload={handleDownload}
         />
+      )}
+
+      {tab === "settings" && (
+        <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: "1.5rem", width: "100%", maxWidth: "800px", margin: "0 auto" }}>
+          {/* Settings Header */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+            <h2 style={{ fontSize: "1.45rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.03em" }}>Settings</h2>
+            <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", fontWeight: 500 }}>
+              Manage your CloudBridge account configurations and security parameters.
+            </p>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "240px 1fr", gap: "1.5rem", width: "100%" }}>
+            {/* Sidebar navigation for settings */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+              <button
+                onClick={() => setSettingsView("change")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.6rem",
+                  padding: "0.65rem 0.85rem",
+                  borderRadius: "8px",
+                  border: "1px solid " + (settingsView === "change" ? "rgba(245, 158, 11, 0.2)" : "transparent"),
+                  background: settingsView === "change" ? "rgba(245, 158, 11, 0.08)" : "transparent",
+                  color: settingsView === "change" ? "#F59E0B" : "var(--text-secondary)",
+                  fontSize: "0.85rem",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+                Change Vault Password
+              </button>
+              <button
+                onClick={() => setSettingsView("forgot")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.6rem",
+                  padding: "0.65rem 0.85rem",
+                  borderRadius: "8px",
+                  border: "1px solid " + (settingsView === "forgot" ? "rgba(245, 158, 11, 0.2)" : "transparent"),
+                  background: settingsView === "forgot" ? "rgba(245, 158, 11, 0.08)" : "transparent",
+                  color: settingsView === "forgot" ? "#F59E0B" : "var(--text-secondary)",
+                  fontSize: "0.85rem",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 2v6h-6" />
+                  <path d="M21 13a9 9 0 1 1-3-7.7L21 8" />
+                </svg>
+                Recover Vault (Forgot)
+              </button>
+            </div>
+
+            {/* Active view component */}
+            <div className="glass-card animate-slide-up" style={{ padding: "1.5rem", borderRadius: "14px", border: "1px solid var(--border-default)", background: "var(--bg-card)", display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+              {settingsView === "change" ? (
+                <form onSubmit={handleSettingsChangePassword} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                    <h3 style={{ fontSize: "1.05rem", fontWeight: 800, color: "var(--text-primary)", margin: 0 }}>Change Vault Password</h3>
+                    <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", margin: 0 }}>Update your Secure Folder security password.</p>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.8rem" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                      <label style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-secondary)" }}>Current Password</label>
+                      <input
+                        type="password"
+                        placeholder="Enter current password"
+                        value={settingsOldPassword}
+                        onChange={(e) => setSettingsOldPassword(e.target.value)}
+                        className="input-field"
+                        required
+                        disabled={settingsIsLoading}
+                      />
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                      <label style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-secondary)" }}>New Password</label>
+                      <input
+                        type="password"
+                        placeholder="Enter new password"
+                        value={settingsNewPassword}
+                        onChange={(e) => setSettingsNewPassword(e.target.value)}
+                        className="input-field"
+                        required
+                        disabled={settingsIsLoading}
+                      />
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                      <label style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-secondary)" }}>Confirm New Password</label>
+                      <input
+                        type="password"
+                        placeholder="Confirm new password"
+                        value={settingsConfirmNewPassword}
+                        onChange={(e) => setSettingsConfirmNewPassword(e.target.value)}
+                        className="input-field"
+                        required
+                        disabled={settingsIsLoading}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.5rem" }}>
+                    <button
+                      type="button"
+                      onClick={() => setSettingsView("forgot")}
+                      style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer", padding: 0 }}
+                      className="hover-underline"
+                    >
+                      Forgot password?
+                    </button>
+
+                    <button
+                      type="submit"
+                      className="btn btn-primary"
+                      style={{ height: "38px", padding: "0 1.25rem" }}
+                      disabled={settingsIsLoading}
+                    >
+                      {settingsIsLoading ? "Updating..." : "Update Password"}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleSettingsResetPassword} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                    <h3 style={{ fontSize: "1.05rem", fontWeight: 800, color: "var(--text-primary)", margin: 0 }}>Reset Vault Password</h3>
+                    <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", margin: 0 }}>
+                      Recover your Secure Folder vault using your Telegram verification OTP.
+                    </p>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.8rem" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                      <label style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-secondary)" }}>Verification Code</label>
+                      <div style={{ display: "flex", gap: "0.5rem" }}>
+                        <input
+                          type="text"
+                          placeholder="6-digit OTP code"
+                          value={settingsOtp}
+                          onChange={(e) => setSettingsOtp(e.target.value)}
+                          className="input-field"
+                          required
+                          disabled={settingsIsLoading || !settingsOtpSent}
+                          style={{ flex: 1 }}
+                        />
+                        <button
+                          type="button"
+                          onClick={handleSettingsSendOtp}
+                          disabled={settingsIsLoading}
+                          className="btn"
+                          style={{
+                            background: "rgba(245, 158, 11, 0.12)",
+                            border: "1px solid rgba(245, 158, 11, 0.2)",
+                            color: "#F59E0B",
+                            fontWeight: 700,
+                            padding: "0 1rem",
+                            fontSize: "0.8rem",
+                            whiteSpace: "nowrap"
+                          }}
+                        >
+                          {settingsOtpSent ? "Resend OTP" : "Send OTP"}
+                        </button>
+                      </div>
+                      <span style={{ fontSize: "0.68rem", color: "var(--text-muted)" }}>
+                        The verification code will be sent to your Telegram Saved Messages chat.
+                      </span>
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                      <label style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-secondary)" }}>New Password</label>
+                      <input
+                        type="password"
+                        placeholder="Enter new password"
+                        value={settingsNewPassword}
+                        onChange={(e) => setSettingsNewPassword(e.target.value)}
+                        className="input-field"
+                        required
+                        disabled={settingsIsLoading || !settingsOtpSent}
+                      />
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                      <label style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-secondary)" }}>Confirm New Password</label>
+                      <input
+                        type="password"
+                        placeholder="Confirm new password"
+                        value={settingsConfirmNewPassword}
+                        onChange={(e) => setSettingsConfirmNewPassword(e.target.value)}
+                        className="input-field"
+                        required
+                        disabled={settingsIsLoading || !settingsOtpSent}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.5rem" }}>
+                    <button
+                      type="button"
+                      onClick={() => setSettingsView("change")}
+                      style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer", padding: 0 }}
+                      className="hover-underline"
+                    >
+                      Back to Change Password
+                    </button>
+
+                    <button
+                      type="submit"
+                      className="btn btn-primary"
+                      style={{ height: "38px", padding: "0 1.25rem" }}
+                      disabled={settingsIsLoading || !settingsOtpSent}
+                    >
+                      {settingsIsLoading ? "Resetting..." : "Reset Password"}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Global Bottom Sticky Upload Progress HUD Widget */}
