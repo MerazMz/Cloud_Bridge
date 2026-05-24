@@ -55,7 +55,9 @@ export const ModelName = {
   Session: 'Session',
   File: 'File',
   FileEmbedding: 'FileEmbedding',
-  UploadJob: 'UploadJob'
+  UploadJob: 'UploadJob',
+  FileFace: 'FileFace',
+  Person: 'Person'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -152,6 +154,30 @@ export const UploadJobScalarFieldEnum = {
 } as const
 
 export type UploadJobScalarFieldEnum = (typeof UploadJobScalarFieldEnum)[keyof typeof UploadJobScalarFieldEnum]
+
+
+export const FileFaceScalarFieldEnum = {
+  id: 'id',
+  fileId: 'fileId',
+  userId: 'userId',
+  box: 'box',
+  embedding: 'embedding',
+  personId: 'personId'
+} as const
+
+export type FileFaceScalarFieldEnum = (typeof FileFaceScalarFieldEnum)[keyof typeof FileFaceScalarFieldEnum]
+
+
+export const PersonScalarFieldEnum = {
+  id: 'id',
+  userId: 'userId',
+  name: 'name',
+  coverFaceId: 'coverFaceId',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type PersonScalarFieldEnum = (typeof PersonScalarFieldEnum)[keyof typeof PersonScalarFieldEnum]
 
 
 export const SortOrder = {

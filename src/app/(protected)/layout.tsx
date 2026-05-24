@@ -4,11 +4,12 @@ import { useEffect, useState, Suspense } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, usePathname } from "next/navigation";
 
 function LayoutWithSidebarContent({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const searchParams = useSearchParams();
+  const pathname = usePathname();
   const tab = searchParams.get("tab") || "dashboard";
   const [totalSize, setTotalSize] = useState(0);
 
@@ -84,7 +85,7 @@ function LayoutWithSidebarContent({ children }: { children: React.ReactNode }) {
 
         {/* Navigation links */}
         <nav style={{ display: "flex", flexDirection: "column", gap: "0.35rem", flex: 1 }}>
-          <Link href="/dashboard?tab=dashboard" className={`nav-link ${tab === "dashboard" ? "active" : ""}`}>
+          <Link href="/dashboard?tab=dashboard" className={`nav-link ${tab === "dashboard" && pathname === "/dashboard" ? "active" : ""}`}>
             <svg style={{ width: "1.15rem", height: "1.15rem", flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="7" height="7" rx="1"/>
               <rect x="14" y="3" width="7" height="7" rx="1"/>
@@ -93,13 +94,13 @@ function LayoutWithSidebarContent({ children }: { children: React.ReactNode }) {
             </svg>
             <span>Dashboard</span>
           </Link>
-          <Link href="/dashboard?tab=my-files" className={`nav-link ${tab === "my-files" ? "active" : ""}`}>
+          <Link href="/dashboard?tab=my-files" className={`nav-link ${tab === "my-files" && pathname === "/dashboard" ? "active" : ""}`}>
             <svg style={{ width: "1.15rem", height: "1.15rem", flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
             </svg>
             <span>My Files</span>
           </Link>
-          <Link href="/dashboard?tab=uploads" className={`nav-link ${tab === "uploads" ? "active" : ""}`}>
+          <Link href="/dashboard?tab=uploads" className={`nav-link ${tab === "uploads" && pathname === "/dashboard" ? "active" : ""}`}>
             <svg style={{ width: "1.15rem", height: "1.15rem", flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V15"/>
               <polyline points="17 8 12 3 7 8"/>
@@ -107,7 +108,7 @@ function LayoutWithSidebarContent({ children }: { children: React.ReactNode }) {
             </svg>
             <span>Uploads</span>
           </Link>
-          <Link href="/dashboard?tab=organizer" className={`nav-link ${tab === "organizer" ? "active" : ""}`}>
+          <Link href="/dashboard?tab=organizer" className={`nav-link ${tab === "organizer" && pathname === "/dashboard" ? "active" : ""}`}>
             <svg style={{ width: "1.15rem", height: "1.15rem", flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="7" height="9" rx="1"/>
               <rect x="14" y="3" width="7" height="5" rx="1"/>
@@ -116,13 +117,13 @@ function LayoutWithSidebarContent({ children }: { children: React.ReactNode }) {
             </svg>
             <span>Organizer</span>
           </Link>
-          <Link href="/dashboard?tab=favorites" className={`nav-link ${tab === "favorites" ? "active" : ""}`}>
+          <Link href="/dashboard?tab=favorites" className={`nav-link ${tab === "favorites" && pathname === "/dashboard" ? "active" : ""}`}>
             <svg style={{ width: "1.15rem", height: "1.15rem", flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
             </svg>
             <span>Favorites</span>
           </Link>
-          <Link href="/dashboard?tab=shared" className={`nav-link ${tab === "shared" ? "active" : ""}`}>
+          <Link href="/dashboard?tab=shared" className={`nav-link ${tab === "shared" && pathname === "/dashboard" ? "active" : ""}`}>
             <svg style={{ width: "1.15rem", height: "1.15rem", flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
               <circle cx="9" cy="7" r="4"/>
@@ -131,7 +132,16 @@ function LayoutWithSidebarContent({ children }: { children: React.ReactNode }) {
             </svg>
             <span>Shared</span>
           </Link>
-          <Link href="/dashboard?tab=trash" className={`nav-link ${tab === "trash" ? "active" : ""}`}>
+          <Link href="/people" className={`nav-link ${pathname.startsWith("/people") ? "active" : ""}`}>
+            <svg style={{ width: "1.15rem", height: "1.15rem", flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
+              <line x1="9" y1="9" x2="9.01" y2="9"/>
+              <line x1="15" y1="9" x2="15.01" y2="9"/>
+            </svg>
+            <span>People</span>
+          </Link>
+          <Link href="/dashboard?tab=trash" className={`nav-link ${tab === "trash" && pathname === "/dashboard" ? "active" : ""}`}>
             <svg style={{ width: "1.15rem", height: "1.15rem", flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
             </svg>

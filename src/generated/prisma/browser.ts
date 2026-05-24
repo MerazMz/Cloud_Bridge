@@ -42,3 +42,13 @@ export type FileEmbedding = Prisma.FileEmbeddingModel
  * 
  */
 export type UploadJob = Prisma.UploadJobModel
+/**
+ * Model FileFace
+ * 
+ */
+export type FileFace = Prisma.FileFaceModel
+/**
+ * Model Person
+ * 
+ */
+export type Person = Prisma.PersonModel

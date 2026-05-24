@@ -20,9 +20,13 @@ export class SemanticSearchService {
    * Generates a normalized CLIP embedding vector using the Hugging Face Space API.
    */
   /**
-   * Generates a normalized CLIP embedding vector and optional BLIP caption using the Hugging Face Space API.
+   * Generates a normalized CLIP embedding vector, optional BLIP caption, and extracts faces using the Hugging Face Space API.
    */
-  static async generateEmbedding(options: EmbedOptions): Promise<{ embedding: number[]; caption?: string }> {
+  static async generateEmbedding(options: EmbedOptions): Promise<{
+    embedding: number[];
+    caption?: string;
+    faces?: Array<{ box: number[]; embedding: number[] }>;
+  }> {
     const cliAction = options.action === "file" ? "text" : options.action;
     const query = options.action === "file" ? (options.filename || "") : (options.query || "");
 
@@ -65,10 +69,11 @@ export class SemanticSearchService {
         throw new Error(result.error || "No embedding in API response");
       }
 
-      log.debug("Generated embedding successfully from server", { url: searchUrl, hasCaption: !!result.caption });
+      log.debug("Generated embedding successfully from server", { url: searchUrl, hasCaption: !!result.caption, faceCount: result.faces?.length || 0 });
       return {
         embedding: result.embedding,
         caption: result.caption,
+        faces: result.faces,
       };
     } catch (err: any) {
       log.error("Failed to generate CLIP embedding", err, { url: searchUrl });
@@ -77,9 +82,15 @@ export class SemanticSearchService {
   }
 
   /**
-   * Saves or updates a file's embedding and optional BLIP caption in PostgreSQL.
+   * Saves or updates a file's embedding, optional BLIP caption, and any detected faces in PostgreSQL.
    */
-  static async saveEmbedding(fileId: string, userId: string, embedding: number[], caption?: string): Promise<void> {
+  static async saveEmbedding(
+    fileId: string,
+    userId: string,
+    embedding: number[],
+    caption?: string,
+    faces?: Array<{ box: number[]; embedding: number[] }>
+  ): Promise<void> {
     await prisma.$transaction([
       prisma.fileEmbedding.upsert({
         where: { fileId },
@@ -93,6 +104,33 @@ export class SemanticSearchService {
         })
       ] : [])
     ]);
+
+    // If faces are detected, cluster them and save them
+    if (faces && faces.length > 0) {
+      try {
+        const { FaceClusteringService } = await import("@/services/face-clustering/face-clustering.service");
+        for (const face of faces) {
+          // Find or create a matching Person group for the face embedding
+          const personId = await FaceClusteringService.clusterFace(userId, face.embedding);
+          
+          const createdFace = await prisma.fileFace.create({
+            data: {
+              fileId,
+              userId,
+              box: face.box,
+              embedding: face.embedding,
+              personId,
+            }
+          });
+
+          // Proactively set this face as the Person group's cover image if they don't have one
+          await FaceClusteringService.ensurePersonHasCover(personId, createdFace.id);
+        }
+        log.info(`Extracted and grouped ${faces.length} faces for file`, { fileId });
+      } catch (err: any) {
+        log.error("Failed to group/save faces for file", { fileId, error: err.message });
+      }
+    }
   }
 
   /**
@@ -189,14 +227,14 @@ export class SemanticSearchService {
           }
 
           // 4. Generate embedding
-          const { embedding, caption } = await this.generateEmbedding({
+          const { embedding, caption, faces } = await this.generateEmbedding({
             action,
             filepath: tempFilePath,
             filename: file.fileName,
           });
 
           // 5. Save embedding
-          await this.saveEmbedding(file.id, userId, embedding, caption);
+          await this.saveEmbedding(file.id, userId, embedding, caption, faces);
           processedCount++;
           log.info("Successfully backfilled embedding for file", { fileId: file.id });
         } catch (err: any) {

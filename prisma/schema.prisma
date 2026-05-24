@@ -63,6 +63,7 @@ model File {
   parent   File?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   children File[] @relation("FolderHierarchy")
   embedding FileEmbedding?
+  faces     FileFace[]
 
   @@index([userId])
   @@index([parentId])
@@ -98,4 +99,34 @@ model UploadJob {
   @@index([userId])
   @@index([status])
   @@map("upload_jobs")
+}
+
+model FileFace {
+  id        String   @id @default(cuid())
+  fileId    String
+  userId    String
+  box       Float[]  // bounding box percentages [x1, y1, x2, y2]
+  embedding Float[]  // 512-dimension face vector
+  personId  String?  // links to a Person entity
+
+  file   File    @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  person Person? @relation(fields: [personId], references: [id], onDelete: SetNull)
+
+  @@index([fileId])
+  @@index([userId])
+  @@index([personId])
+  @@map("file_faces")
+}
+
+model Person {
+  id          String     @id @default(cuid())
+  userId      String
+  name        String?    // User-assigned name
+  coverFaceId String?    // Cover avatar face ID
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  faces       FileFace[]
+
+  @@index([userId])
+  @@map("people")
 }
