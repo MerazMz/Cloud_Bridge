@@ -312,7 +312,7 @@ export class SemanticSearchService {
       query: query.trim(),
     });
 
-    // 2. Fetch all file embeddings for the user from PostgreSQL, filtering for images only
+    // 2. Fetch all file embeddings for the user from PostgreSQL, filtering for images only, excluding secure ones
     const userEmbeddings = await prisma.fileEmbedding.findMany({
       where: {
         userId,
@@ -320,6 +320,7 @@ export class SemanticSearchService {
           mimeType: {
             startsWith: "image/",
           },
+          isSecure: false,
         },
       },
       include: {

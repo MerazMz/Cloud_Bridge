@@ -20,6 +20,7 @@ model User {
   displayName              String?
   username                 String?
   profilePhotoUrl          String?
+  securePasswordHash       String?  // Hash of the secure folder password
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
 
@@ -54,6 +55,7 @@ model File {
   mimeType          String
   isDeleted         Boolean  @default(false)
   isShared          Boolean  @default(false)
+  isSecure          Boolean  @default(false)  // Whether it's in the secure folder
   caption           String?  @db.Text
   parentId          String?
   createdAt         DateTime @default(now())

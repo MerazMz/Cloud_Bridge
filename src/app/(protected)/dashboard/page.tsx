@@ -44,6 +44,7 @@ export interface QueueItem {
   uploadedBytes?: number;
   parentId?: string | null;
   cancel?: () => void;
+  isSecure?: boolean;
 }
 
 function DashboardContent() {
@@ -78,6 +79,30 @@ function DashboardContent() {
   const [isBatchActiveDeleting, setIsBatchActiveDeleting] = useState(false);
   const selectedActiveIdsArray = Object.keys(selectedActiveIds).filter((id) => selectedActiveIds[id]);
 
+  // Secure Folder State
+  const [isSecureUnlocked, setIsSecureUnlocked] = useState(false);
+  const shouldLockVaultAfterUploadsRef = useRef(false);
+  const [hasSecurePassword, setHasSecurePassword] = useState(false);
+  const [securePassword, setSecurePassword] = useState("");
+  const [securePasswordConfirm, setSecurePasswordConfirm] = useState("");
+  const [secureOtp, setSecureOtp] = useState("");
+  const [secureOtpSent, setSecureOtpSent] = useState(false);
+  const [isSecureLoading, setIsSecureLoading] = useState(false);
+  const [secureUploadPrompt, setSecureUploadPrompt] = useState<{
+    isOpen: boolean;
+    onConfirm: (password: string) => void;
+    onCancel: () => void;
+  } | null>(null);
+
+  // Settings Secure Folder Password States
+  const [settingsOldPassword, setSettingsOldPassword] = useState("");
+  const [settingsNewPassword, setSettingsNewPassword] = useState("");
+  const [settingsConfirmNewPassword, setSettingsConfirmNewPassword] = useState("");
+  const [settingsOtp, setSettingsOtp] = useState("");
+  const [settingsOtpSent, setSettingsOtpSent] = useState(false);
+  const [settingsIsLoading, setSettingsIsLoading] = useState(false);
+  const [settingsView, setSettingsView] = useState<"change" | "forgot">("change");
+
   // Sorting and Filtering States for My Files
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "largest" | "smallest">("newest");
   const [filterType, setFilterType] = useState<"all" | "image" | "document" | "media" | "archive" | "pdf" | "other">("all");
@@ -88,8 +113,8 @@ function DashboardContent() {
   const [dragOverItem, setDragOverItem] = useState<DBFile | null>(null);
   const [mergeModal, setMergeModal] = useState<{
     isOpen: boolean;
-    fileA: DBFile;
-    fileB: DBFile;
+    filesToMerge: DBFile[];
+    targetFile: DBFile;
     folderName: string;
   } | null>(null);
   const [undoStack, setUndoStack] = useState<Array<{
@@ -228,6 +253,7 @@ function DashboardContent() {
       speed: "0 KB/s",
       uploadedBytes: 0,
       parentId: parentId,
+      isSecure: tab === "secure-folder",
     }));
     setUploadQueue((prev) => [...prev, ...newItems]);
   };
@@ -249,6 +275,18 @@ function DashboardContent() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  // Listen for Escape key to exit multi-select mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isMultiSelectMode) {
+        setIsMultiSelectMode(false);
+        setSelectedActiveIds({});
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isMultiSelectMode]);
 
   // Client-side visual state features
   const [favorites, setFavorites] = useState<string[]>([]);
@@ -397,6 +435,8 @@ function DashboardContent() {
   useEffect(() => {
     const handleGlobalClick = () => {
       setActiveMenuFileId(null);
+      setActiveUploadFolderMenuId(null);
+      setIsCurrentFolderUploadMenuOpen(false);
     };
     window.addEventListener("click", handleGlobalClick);
     return () => window.removeEventListener("click", handleGlobalClick);
@@ -425,6 +465,9 @@ function DashboardContent() {
   const currentJobIdRef = useRef<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const [activeUploadFolderMenuId, setActiveUploadFolderMenuId] = useState<string | null>(null);
+  const [isCurrentFolderUploadMenuOpen, setIsCurrentFolderUploadMenuOpen] = useState(false);
 
   // Initialize theme and local storage states
   useEffect(() => {
@@ -542,12 +585,15 @@ function DashboardContent() {
   const fetchFiles = async (folderId: string | null = currentFolderId) => {
     setFilesLoading(true);
     try {
-      const res = await fetch(`/api/folders?parentId=${folderId || ""}`);
+      const isSecure = tab === "secure-folder";
+      const res = await fetch(`/api/folders?parentId=${folderId || ""}${isSecure ? "&secure=true" : ""}`);
       const json = await res.json();
       if (json.success) {
         setFiles(json.items);
       } else {
-        showToast("error", json.message || "Failed to load files.");
+        if (json.message !== "Secure folder is locked. Please unlock it first.") {
+          showToast("error", json.message || "Failed to load files.");
+        }
       }
     } catch (err) {
       showToast("error", "An error occurred while fetching files.");
@@ -610,7 +656,391 @@ function DashboardContent() {
     if (user && user.storageChannelId) {
       fetchFiles(currentFolderId);
     }
-  }, [user, currentFolderId]);
+  }, [user, currentFolderId, tab]);
+
+  // Reset folder navigation when changing tabs
+  useEffect(() => {
+    setCurrentFolderId(null);
+    setFolderBreadcrumbs([]);
+  }, [tab]);
+
+  // Lock secure folder when navigating away from it
+  useEffect(() => {
+    if (tab !== "secure-folder" && isSecureUnlocked) {
+      const hasActiveSecureUploads = uploadQueue.some(
+        (item) => item.isSecure && (item.status === "pending" || item.status === "uploading")
+      );
+      if (hasActiveSecureUploads) {
+        shouldLockVaultAfterUploadsRef.current = true;
+      } else {
+        fetch("/api/auth/secure-folder/lock", { method: "POST" })
+          .then((res) => res.json())
+          .then((json) => {
+            if (json.success) {
+              setIsSecureUnlocked(false);
+            }
+          })
+          .catch((err) => console.error("Error locking secure folder on tab change", err));
+      }
+    }
+  }, [tab, isSecureUnlocked, uploadQueue]);
+
+  // Check secure folder status
+  const checkSecureStatus = async () => {
+    try {
+      const res = await fetch("/api/auth/secure-folder/status");
+      const json = await res.json();
+      if (json.success) {
+        setHasSecurePassword(json.data.hasPassword);
+        setIsSecureUnlocked(json.data.isUnlocked);
+      }
+    } catch (err) {
+      console.error("Failed to check secure folder status", err);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "secure-folder") {
+      checkSecureStatus();
+    }
+  }, [tab]);
+
+  // Listen to custom refresh and toast events
+  useEffect(() => {
+    const handleRefresh = () => {
+      fetchFiles(currentFolderId);
+      fetchAllFiles();
+      if (tab === "secure-folder") {
+        checkSecureStatus();
+      }
+    };
+    const handleCustomToast = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail) {
+        showToast(customEvent.detail.type, customEvent.detail.message);
+      }
+    };
+
+    window.addEventListener("cloudbridge-refresh-files", handleRefresh);
+    window.addEventListener("cloudbridge-toast", handleCustomToast);
+
+    return () => {
+      window.removeEventListener("cloudbridge-refresh-files", handleRefresh);
+      window.removeEventListener("cloudbridge-toast", handleCustomToast);
+    };
+  }, [currentFolderId, tab]);
+
+  // Listen to custom sidebar lock events
+  useEffect(() => {
+    const handleLockVaultEvent = () => {
+      if (isSecureUnlocked) {
+        handleLockSecureFolder();
+      }
+    };
+    window.addEventListener("cloudbridge-lock-vault", handleLockVaultEvent);
+    return () => {
+      window.removeEventListener("cloudbridge-lock-vault", handleLockVaultEvent);
+    };
+  }, [isSecureUnlocked]);
+
+  const handleSendSecureOtp = async () => {
+    setIsSecureLoading(true);
+    try {
+      const res = await fetch("/api/auth/secure-folder/send-otp", { method: "POST" });
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", "OTP sent to your Telegram Saved Messages.");
+        setSecureOtpSent(true);
+      } else {
+        showToast("error", json.message || "Failed to send OTP.");
+      }
+    } catch {
+      showToast("error", "An error occurred while sending OTP.");
+    } finally {
+      setIsSecureLoading(false);
+    }
+  };
+
+  const handleSetupSecurePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (securePassword !== securePasswordConfirm) {
+      showToast("error", "Passwords do not match.");
+      return;
+    }
+    setIsSecureLoading(true);
+    try {
+      const res = await fetch("/api/auth/secure-folder/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ otp: secureOtp, password: securePassword }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", "Secure password configured successfully!");
+        setSecurePassword("");
+        setSecurePasswordConfirm("");
+        setSecureOtp("");
+        setSecureOtpSent(false);
+        setIsSecureUnlocked(true);
+        setHasSecurePassword(true);
+        fetchFiles(null);
+        fetchAllFiles();
+      } else {
+        showToast("error", json.message || "Failed to configure password.");
+      }
+    } catch {
+      showToast("error", "An error occurred during password setup.");
+    } finally {
+      setIsSecureLoading(false);
+    }
+  };
+
+  const handleUnlockSecureFolder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSecureLoading(true);
+    try {
+      const res = await fetch("/api/auth/secure-folder/unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: securePassword }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", "Vault unlocked successfully.");
+        setSecurePassword("");
+        setIsSecureUnlocked(true);
+        fetchFiles(null);
+      } else {
+        showToast("error", json.message || "Incorrect password.");
+      }
+    } catch {
+      showToast("error", "An error occurred while unlocking.");
+    } finally {
+      setIsSecureLoading(false);
+    }
+  };
+
+  const handleLockSecureFolder = async () => {
+    setIsSecureLoading(true);
+    try {
+      const res = await fetch("/api/auth/secure-folder/lock", { method: "POST" });
+      const json = await res.json();
+      if (json.success) {
+        showToast("info", "Secure folder locked.");
+        setIsSecureUnlocked(false);
+        setFiles([]);
+      } else {
+        showToast("error", json.message || "Failed to lock secure folder.");
+      }
+    } catch {
+      showToast("error", "An error occurred while locking.");
+    } finally {
+      setIsSecureLoading(false);
+    }
+  };
+
+  const handleTriggerPasswordReset = async () => {
+    setHasSecurePassword(false);
+    setSecureOtpSent(false);
+    setSecureOtp("");
+    setSecurePassword("");
+    setSecurePasswordConfirm("");
+    await handleSendSecureOtp();
+  };
+
+  const handleSettingsSendOtp = async () => {
+    setSettingsIsLoading(true);
+    try {
+      const res = await fetch("/api/auth/secure-folder/send-otp", { method: "POST" });
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", "OTP sent to your Telegram Saved Messages.");
+        setSettingsOtpSent(true);
+      } else {
+        showToast("error", json.message || "Failed to send OTP.");
+      }
+    } catch {
+      showToast("error", "An error occurred while sending OTP.");
+    } finally {
+      setSettingsIsLoading(false);
+    }
+  };
+
+  const handleSettingsResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (settingsNewPassword !== settingsConfirmNewPassword) {
+      showToast("error", "Passwords do not match.");
+      return;
+    }
+    setSettingsIsLoading(true);
+    try {
+      const res = await fetch("/api/auth/secure-folder/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ otp: settingsOtp, password: settingsNewPassword }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", "Secure password reset successfully!");
+        setSettingsNewPassword("");
+        setSettingsConfirmNewPassword("");
+        setSettingsOtp("");
+        setSettingsOtpSent(false);
+        setSettingsView("change");
+        setIsSecureUnlocked(true);
+        setHasSecurePassword(true);
+        fetchFiles(null);
+        fetchAllFiles();
+      } else {
+        showToast("error", json.message || "Failed to reset password.");
+      }
+    } catch {
+      showToast("error", "An error occurred during password reset.");
+    } finally {
+      setSettingsIsLoading(false);
+    }
+  };
+
+  const handleSettingsChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (settingsNewPassword !== settingsConfirmNewPassword) {
+      showToast("error", "New passwords do not match.");
+      return;
+    }
+    setSettingsIsLoading(true);
+    try {
+      const res = await fetch("/api/auth/secure-folder/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ oldPassword: settingsOldPassword, newPassword: settingsNewPassword }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", "Secure password updated successfully!");
+        setSettingsOldPassword("");
+        setSettingsNewPassword("");
+        setSettingsConfirmNewPassword("");
+        setIsSecureUnlocked(true);
+        fetchFiles(null);
+        fetchAllFiles();
+      } else {
+        showToast("error", json.message || "Failed to update password.");
+      }
+    } catch {
+      showToast("error", "An error occurred while changing password.");
+    } finally {
+      setSettingsIsLoading(false);
+    }
+  };
+
+  const promptSecurePassword = () => {
+    return new Promise<string | null>((resolve) => {
+      setSecureUploadPrompt({
+        isOpen: true,
+        onConfirm: (password) => {
+          setSecureUploadPrompt(null);
+          resolve(password);
+        },
+        onCancel: () => {
+          setSecureUploadPrompt(null);
+          resolve(null);
+        }
+      });
+    });
+  };
+
+  const checkSecureUnlockedStatus = async (): Promise<boolean> => {
+    try {
+      const res = await fetch("/api/auth/secure-folder/status");
+      const json = await res.json();
+      return json.success && json.data.isUnlocked;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleMoveToSecure = async (file: DBFile) => {
+    const isSecuring = !file.isSecure;
+    
+    if (isSecuring) {
+      const password = await promptSecurePassword();
+      if (!password) return;
+      
+      const unlockRes = await fetch("/api/auth/secure-folder/unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      const unlockJson = await unlockRes.json();
+      if (!unlockJson.success) {
+        showToast("error", "Incorrect secure password. Action aborted.");
+        return;
+      }
+    } else {
+      const isUnlocked = await checkSecureUnlockedStatus();
+      if (!isUnlocked) {
+        const password = await promptSecurePassword();
+        if (!password) return;
+        
+        const unlockRes = await fetch("/api/auth/secure-folder/unlock", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password }),
+        });
+        const unlockJson = await unlockRes.json();
+        if (!unlockJson.success) {
+          showToast("error", "Incorrect secure password. Action aborted.");
+          return;
+        }
+      }
+    }
+
+    try {
+      const res = await fetch(`/api/files/${file.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isSecure: isSecuring, parentId: null }),
+      });
+      
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", isSecuring ? `"${file.fileName}" secured.` : `"${file.fileName}" unsecured.`);
+        fetchFiles(currentFolderId);
+        fetchAllFiles();
+      } else {
+        showToast("error", json.message || "Failed to update item vault status.");
+      }
+    } catch {
+      showToast("error", "An error occurred while moving item.");
+    }
+  };
+
+  const handleUploadClick = async (isFolder: boolean) => {
+    if (tab === "secure-folder") {
+      const password = await promptSecurePassword();
+      if (!password) return;
+
+      const res = await fetch("/api/auth/secure-folder/unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        showToast("error", "Incorrect secure password. Upload aborted.");
+        return;
+      }
+    }
+
+    setUploadTargetFolderId(currentFolderId);
+    setTimeout(() => {
+      if (isFolder) {
+        folderInputRef.current?.click();
+      } else {
+        fileInputRef.current?.click();
+      }
+    }, 150);
+  };
 
   useEffect(() => {
     if (user && user.storageChannelId) {
@@ -634,31 +1064,31 @@ function DashboardContent() {
     }
   }, [user]);
 
-  // const handleSyncSemanticSearch = async (force = false) => {
-  //   if (isSyncing) return;
-  //   setIsSyncing(true);
-  //   showToast("info", force ? "Forcing generation of all image embeddings in background..." : "Triggering semantic search sync for previous image files...");
-  //   try {
-  //     const res = await fetch("/api/files/backfill", {
-  //       method: "POST",
-  //       headers: {
-  //         "Content-Type": "application/json",
-  //       },
-  //       body: JSON.stringify({ force }),
-  //     });
-  //     const json = await res.json();
-  //     if (json.success) {
-  //       showToast("success", "Semantic search sync successfully started in background.");
-  //       addNotification("success", force ? "Full embedding re-generation started." : "Missing image embedding backfill started.");
-  //     } else {
-  //       showToast("error", json.message || "Failed to trigger embedding sync.");
-  //     }
-  //   } catch (err: any) {
-  //     showToast("error", err.message || "An error occurred while connecting to backfill service.");
-  //   } finally {
-  //     setIsSyncing(false);
-  //   }
-  // };
+  const handleSyncSemanticSearch = async (force = false) => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    showToast("info", force ? "Forcing generation of all image embeddings in background..." : "Triggering semantic search sync for previous image files...");
+    try {
+      const res = await fetch("/api/files/backfill", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ force }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("success", "Semantic search sync successfully started in background.");
+        addNotification("success", force ? "Full embedding re-generation started." : "Missing image embedding backfill started.");
+      } else {
+        showToast("error", json.message || "Failed to trigger embedding sync.");
+      }
+    } catch (err: any) {
+      showToast("error", err.message || "An error occurred while connecting to backfill service.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Sequential Upload Queue Runner Effect Hook
   useEffect(() => {
@@ -666,7 +1096,7 @@ function DashboardContent() {
     const nextItem = uploadQueue.find((item) => item.status === "pending");
 
     if (nextItem && !activeItem) {
-      uploadQueueItem(nextItem.id, nextItem.file, nextItem.parentId);
+      uploadQueueItem(nextItem.id, nextItem.file, nextItem.parentId, nextItem.isSecure);
     }
   }, [uploadQueue]);
 
@@ -748,7 +1178,7 @@ function DashboardContent() {
   };
 
   // Processes and uploads a single item in the queue sequentially
-  const uploadQueueItem = async (itemId: string, file: File, itemParentId?: string | null) => {
+  const uploadQueueItem = async (itemId: string, file: File, itemParentId?: string | null, isItemSecure?: boolean) => {
 
     // 2. Mark status as uploading
     setUploadQueue((prev) =>
@@ -789,6 +1219,12 @@ function DashboardContent() {
         headers["x-parent-id"] = itemParentId;
       }
 
+      if (compressVideoRef.current) {
+        headers["x-compress-video"] = "true";
+      }
+      if (isItemSecure) {
+        headers["x-is-secure"] = "true";
+      }
 
       const responseData = await uploadFileWithXhr({
         url: "/api/files/upload",
@@ -927,10 +1363,24 @@ function DashboardContent() {
 
       // Check if there are any remaining items in the queue that are pending or active
       let hasMore = false;
+      let hasMoreSecure = false;
       setUploadQueue((current) => {
         hasMore = current.some((i) => i.id !== itemId && (i.status === "pending" || i.status === "uploading"));
+        hasMoreSecure = current.some((i) => i.id !== itemId && i.isSecure && (i.status === "pending" || i.status === "uploading"));
         return current;
       });
+
+      if (!hasMoreSecure && shouldLockVaultAfterUploadsRef.current) {
+        shouldLockVaultAfterUploadsRef.current = false;
+        fetch("/api/auth/secure-folder/lock", { method: "POST" })
+          .then((res) => res.json())
+          .then((json) => {
+            if (json.success) {
+              setIsSecureUnlocked(false);
+            }
+          })
+          .catch((err) => console.error("Error locking secure folder after uploads finished", err));
+      }
 
       if (!hasMore) {
         // Clear global states so that if the queue finishes, the bottom HUD goes away!
@@ -1235,13 +1685,38 @@ function DashboardContent() {
 
   // Drag & Drop Handlers for My Files
   const handleDragStart = (e: React.DragEvent, item: DBFile) => {
-    if (tab !== "my-files" || isMultiSelectMode) {
+    const target = e.target as HTMLElement;
+    if (
+      target.closest("button") ||
+      target.closest("input") ||
+      target.closest("select") ||
+      target.closest("a")
+    ) {
       e.preventDefault();
       return;
     }
-    setDraggedItem(item);
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", item.id);
+
+    if (tab !== "my-files") {
+      e.preventDefault();
+      return;
+    }
+
+    if (isMultiSelectMode) {
+      // If item being dragged is not in selection, select it
+      let finalSelection = [...selectedActiveIdsArray];
+      if (!selectedActiveIds[item.id]) {
+        setSelectedActiveIds((prev) => ({ ...prev, [item.id]: true }));
+        finalSelection.push(item.id);
+      }
+
+      setDraggedItem(item);
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", JSON.stringify({ isBatch: true, ids: finalSelection }));
+    } else {
+      setDraggedItem(item);
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", JSON.stringify({ isBatch: false, ids: [item.id] }));
+    }
   };
 
   const handleDragEnd = () => {
@@ -1253,18 +1728,25 @@ function DashboardContent() {
     e.preventDefault();
     if (!draggedItem || draggedItem.id === item.id) return;
 
-    // Prevent loop: a folder cannot be dropped inside its descendants
-    if (draggedItem.mimeType === "folder") {
-      const isDescendant = (parentId: string | null): boolean => {
-        if (!parentId) return false;
-        if (parentId === draggedItem.id) return true;
-        const parentFolder = allFiles.find((f) => f.id === parentId);
-        return parentFolder ? isDescendant(parentFolder.parentId || null) : false;
-      };
+    const itemsToMoveIds = isMultiSelectMode
+      ? Array.from(new Set([...selectedActiveIdsArray, draggedItem.id]))
+      : [draggedItem.id];
 
-      if (item.mimeType === "folder" && (item.id === draggedItem.id || isDescendant(item.id))) {
-        return;
+    if (itemsToMoveIds.includes(item.id)) return;
+
+    // Prevent loop: a folder cannot be dropped inside its descendants
+    const isDescendantOfAnyDraggedFolder = (parentId: string | null | undefined): boolean => {
+      if (!parentId) return false;
+      if (itemsToMoveIds.includes(parentId)) {
+        const parentFolder = allFiles.find((f) => f.id === parentId);
+        if (parentFolder && parentFolder.mimeType === "folder") return true;
       }
+      const parentFolder = allFiles.find((f) => f.id === parentId);
+      return parentFolder ? isDescendantOfAnyDraggedFolder(parentFolder.parentId) : false;
+    };
+
+    if (item.mimeType === "folder" && isDescendantOfAnyDraggedFolder(item.id)) {
+      return;
     }
 
     setDragOverItem(item);
@@ -1279,38 +1761,98 @@ function DashboardContent() {
     setDragOverItem(null);
     if (!draggedItem || draggedItem.id === target.id) return;
 
-    // FEATURE 1: Drag File onto File -> Create Folder
-    if (draggedItem.mimeType !== "folder" && target.mimeType !== "folder") {
-      setMergeModal({ isOpen: true, fileA: draggedItem, fileB: target, folderName: "" });
+    // Identify all items we are dragging
+    let itemsToMoveIds = isMultiSelectMode
+      ? [...selectedActiveIdsArray]
+      : [draggedItem.id];
+
+    if (isMultiSelectMode && !itemsToMoveIds.includes(draggedItem.id)) {
+      itemsToMoveIds.push(draggedItem.id);
+    }
+
+    if (itemsToMoveIds.includes(target.id)) {
+      showToast("info", "Cannot move items onto themselves.");
       return;
     }
 
-    // FEATURE 2 & 3: Drag File/Folder into Folder -> Move / Nest
+    const itemsToMove = allFiles.filter((f) => itemsToMoveIds.includes(f.id));
+
+    // Case 1: Drop onto a Folder -> Batch Move / Nest
     if (target.mimeType === "folder") {
-      // Loop prevention check for folder nesting
-      const isDescendant = (parentId: string | null | undefined): boolean => {
+      const isDescendantOfAnyDraggedFolder = (parentId: string | null | undefined): boolean => {
         if (!parentId) return false;
-        if (parentId === draggedItem.id) return true;
+        if (itemsToMoveIds.includes(parentId)) {
+          const parentFolder = allFiles.find((f) => f.id === parentId);
+          if (parentFolder && parentFolder.mimeType === "folder") return true;
+        }
         const parentFolder = allFiles.find((f) => f.id === parentId);
-        return parentFolder ? isDescendant(parentFolder.parentId) : false;
+        return parentFolder ? isDescendantOfAnyDraggedFolder(parentFolder.parentId) : false;
       };
 
-      if (draggedItem.mimeType === "folder" && isDescendant(target.id)) {
-        showToast("info", "Cannot move a folder into one of its subfolders.");
+      if (isDescendantOfAnyDraggedFolder(target.id)) {
+        showToast("info", "Cannot move a folder into itself or one of its subfolders.");
         return;
       }
 
-      if (draggedItem.parentId === target.id) return;
+      const itemsToActuallyMove = itemsToMove.filter((item) => item.parentId !== target.id);
+      if (itemsToActuallyMove.length === 0) return;
 
       // Start visually premium merge transitions
       setMergingSourceId(draggedItem.id);
       setMergingTargetId(target.id);
 
       setTimeout(async () => {
-        await moveItem(draggedItem.id, target.id);
+        await moveItemsBatch(itemsToActuallyMove.map(i => i.id), target.id);
         setMergingSourceId(null);
         setMergingTargetId(null);
+        setSelectedActiveIds({});
       }, 400);
+    }
+    // Case 2: Drop onto a File -> Merge into new Folder
+    else {
+      setMergeModal({
+        isOpen: true,
+        filesToMerge: itemsToMove,
+        targetFile: target,
+        folderName: "",
+      });
+    }
+  };
+
+  const moveItemsBatch = async (itemIds: string[], targetParentId: string | null) => {
+    const items = allFiles.filter((f) => itemIds.includes(f.id));
+    if (items.length === 0) return;
+
+    try {
+      const movePromises = items.map((item) =>
+        fetch(`/api/files/${item.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ parentId: targetParentId }),
+        }).then((res) => res.json())
+      );
+
+      const results = await Promise.all(movePromises);
+      const successfulMoves = results.filter((res) => res.success);
+
+      if (successfulMoves.length === items.length) {
+        showToast("success", `Moved ${items.length} items successfully.`);
+        setUndoStack((prev) => [
+          {
+            action: "move",
+            items: items.map((item) => ({ id: item.id, oldParentId: item.parentId || null })),
+          },
+          ...prev,
+        ]);
+        fetchFiles(currentFolderId);
+        fetchAllFiles();
+      } else {
+        showToast("error", `Failed to move some items (${successfulMoves.length}/${items.length} succeeded).`);
+        fetchFiles(currentFolderId);
+        fetchAllFiles();
+      }
+    } catch {
+      showToast("error", "An error occurred while moving items.");
     }
   };
 
@@ -1344,11 +1886,15 @@ function DashboardContent() {
 
   const handleMergeCreateFolder = async (folderName: string) => {
     if (!mergeModal || !folderName.trim()) return;
-    const { fileA, fileB } = mergeModal;
+    const { filesToMerge, targetFile } = mergeModal;
     setMergeModal(null);
 
-    setMergingSourceId(fileA.id);
-    setMergingTargetId(fileB.id);
+    const itemIdsToMove = filesToMerge.map((f) => f.id);
+    if (!itemIdsToMove.includes(targetFile.id)) {
+      itemIdsToMove.push(targetFile.id);
+    }
+
+    setMergingSourceId(targetFile.id);
 
     try {
       // 1. Create Folder
@@ -1367,28 +1913,30 @@ function DashboardContent() {
         
         setNewFolderScaleInId(newFolderId);
 
-        // 2. Move both files inside new folder
-        const moveA = fetch(`/api/files/${fileA.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ parentId: newFolderId }),
-        });
-        const moveB = fetch(`/api/files/${fileB.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ parentId: newFolderId }),
-        });
+        // 2. Move files inside the new folder
+        const movePromises = itemIdsToMove.map((id) =>
+          fetch(`/api/files/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ parentId: newFolderId }),
+          }).then((r) => r.json())
+        );
 
-        await Promise.all([moveA, moveB]);
-        showToast("success", `Created folder "${folderName.trim()}" containing both files.`);
+        const moveResults = await Promise.all(movePromises);
+        const successfulCount = moveResults.filter((r) => r.success).length;
+
+        if (successfulCount === itemIdsToMove.length) {
+          showToast("success", `Created folder "${folderName.trim()}" containing ${itemIdsToMove.length} items.`);
+        } else {
+          showToast("info", `Created folder, but failed to move some items (${successfulCount}/${itemIdsToMove.length} succeeded).`);
+        }
+
+        const oldItems = allFiles.filter((f) => itemIdsToMove.includes(f.id));
 
         setUndoStack((prev) => [
           {
             action: "create_folder_group",
-            items: [
-              { id: fileA.id, oldParentId: fileA.parentId || null },
-              { id: fileB.id, oldParentId: fileB.parentId || null },
-            ],
+            items: oldItems.map((item) => ({ id: item.id, oldParentId: item.parentId || null })),
             newFolderId,
           },
           ...prev,
@@ -1418,20 +1966,23 @@ function DashboardContent() {
 
     try {
       if (lastAction.action === "move") {
-        const { id, oldParentId } = lastAction.items[0];
-        const res = await fetch(`/api/files/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ parentId: oldParentId }),
-        });
-        const json = await res.json();
-        if (json.success) {
+        const moves = lastAction.items.map((item) =>
+          fetch(`/api/files/${item.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ parentId: item.oldParentId }),
+          }).then((res) => res.json())
+        );
+        const results = await Promise.all(moves);
+        const successCount = results.filter((r) => r.success).length;
+
+        if (successCount === lastAction.items.length) {
           showToast("info", "Move undone.");
-          fetchFiles(currentFolderId);
-          fetchAllFiles();
         } else {
-          showToast("error", "Failed to undo move.");
+          showToast("error", `Undo partially succeeded (${successCount}/${lastAction.items.length} undone).`);
         }
+        fetchFiles(currentFolderId);
+        fetchAllFiles();
       } else if (lastAction.action === "create_folder_group") {
         // Move files back to original parents
         const moves = lastAction.items.map((item) =>
@@ -1765,6 +2316,21 @@ function DashboardContent() {
     setIsDragActive(false);
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      if (tab === "secure-folder") {
+        const password = await promptSecurePassword();
+        if (!password) return;
+        
+        const res = await fetch("/api/auth/secure-folder/unlock", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password }),
+        });
+        const json = await res.json();
+        if (!json.success) {
+          showToast("error", "Incorrect password. Drag upload aborted.");
+          return;
+        }
+      }
       addFilesToQueue(e.dataTransfer.files);
       router.push("/dashboard?tab=uploads");
     }
@@ -1772,7 +2338,92 @@ function DashboardContent() {
 
   const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      addFilesToQueue(e.target.files, uploadTargetFolderId);
+      const filesArray = Array.from(e.target.files);
+      const hasFolders = filesArray.some((f) => f.webkitRelativePath);
+      
+      let folderPathCache: Record<string, string> = {};
+      const targetFolderId = uploadTargetFolderId !== null ? uploadTargetFolderId : currentFolderId;
+
+      const resolveFolderPath = async (relativePath: string): Promise<string | null> => {
+        const segments = relativePath.split("/").filter(Boolean);
+        if (segments.length <= 1) return targetFolderId;
+        
+        const folderSegments = segments.slice(0, -1);
+        let currentParentId = targetFolderId;
+        
+        let pathPrefix = "";
+        for (const segment of folderSegments) {
+          pathPrefix = pathPrefix ? `${pathPrefix}/${segment}` : segment;
+          
+          if (folderPathCache[pathPrefix]) {
+            currentParentId = folderPathCache[pathPrefix];
+          } else {
+            const existingFolder = allFiles.find(
+              (f) =>
+                f.mimeType === "folder" &&
+                f.fileName.toLowerCase() === segment.toLowerCase() &&
+                (f.parentId === currentParentId || (!f.parentId && !currentParentId)) &&
+                !f.isDeleted
+            );
+            
+            if (existingFolder) {
+              folderPathCache[pathPrefix] = existingFolder.id;
+              currentParentId = existingFolder.id;
+            } else {
+              try {
+                const res = await fetch("/api/folders", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    name: segment,
+                    parentId: currentParentId,
+                    isSecure: tab === "secure-folder",
+                  }),
+                });
+                const json = await res.json();
+                if (json.success) {
+                  folderPathCache[pathPrefix] = json.folder.id;
+                  currentParentId = json.folder.id;
+                  allFiles.push(json.folder);
+                } else {
+                  console.error("Failed to create folder:", json.message);
+                }
+              } catch (err) {
+                console.error("Error creating folder in path:", err);
+              }
+            }
+          }
+        }
+        return currentParentId;
+      };
+
+      if (hasFolders) {
+        showToast("info", "Resolving folder structure...");
+      }
+
+      const queueItems: QueueItem[] = [];
+      for (const file of filesArray) {
+        let parentId = targetFolderId;
+        if (file.webkitRelativePath) {
+          const resolved = await resolveFolderPath(file.webkitRelativePath);
+          if (resolved) parentId = resolved;
+        }
+        
+        queueItems.push({
+          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          file,
+          progress: 0,
+          status: "pending",
+          speed: "0 KB/s",
+          uploadedBytes: 0,
+          parentId: parentId,
+          isSecure: tab === "secure-folder",
+        });
+      }
+
+      setUploadQueue((prev) => [...prev, ...queueItems]);
+      fetchFiles(currentFolderId);
+      fetchAllFiles();
       router.push("/dashboard?tab=uploads");
     }
   };
@@ -2101,6 +2752,9 @@ function DashboardContent() {
   } else if (tab === "trash") {
     visibleFiles = allFiles.filter((f) => f.isDeleted);
   } else if (tab === "organizer") {
+  } else if (tab === "secure-folder") {
+    visibleFiles = activeFiles;
+  } else if (tab === "folders") {
     if (selectedFolderCategory === "images") visibleFiles = imageFiles;
     else if (selectedFolderCategory === "documents") visibleFiles = documentFiles;
     else if (selectedFolderCategory === "media") visibleFiles = mediaFiles;
@@ -2474,6 +3128,16 @@ function DashboardContent() {
         }
       `}</style>
       <input type="file" ref={fileInputRef} onChange={handleFileChange} style={{ display: "none" }} multiple />
+      <input
+        type="file"
+        ref={folderInputRef}
+        onChange={handleFileChange}
+        style={{ display: "none" }}
+        // @ts-ignore
+        webkitdirectory=""
+        directory=""
+        multiple
+      />
       {/* Top Header Bar */}
       <DashboardHeader
         searchTerm={searchTerm}
@@ -2487,18 +3151,20 @@ function DashboardContent() {
       />
 
       {/* Welcome & Cover Banner */}
-      <WelcomeBanner
-        userName={userName}
-        tab={tab}
-        triggerFileInput={triggerFileInput}
-        isUploading={isUploading}
-        showBanner={showBanner}
-        isBannerVisible={isBannerVisible}
-        handleCloseBanner={handleCloseBanner}
-        onCreateFolderClick={() => setIsNewFolderModalOpen(true)}
-        // onSyncClick={handleSyncSemanticSearch}
-        isSyncing={isSyncing}
-      />
+      {tab !== "settings" && !(tab === "secure-folder" && !isSecureUnlocked) && (
+        <WelcomeBanner
+          userName={userName}
+          tab={tab}
+          triggerFileInput={triggerFileInput}
+          isUploading={isUploading}
+          showBanner={showBanner}
+          isBannerVisible={isBannerVisible}
+          handleCloseBanner={handleCloseBanner}
+          onCreateFolderClick={() => setIsNewFolderModalOpen(true)}
+          onSyncClick={handleSyncSemanticSearch}
+          isSyncing={isSyncing}
+        />
+      )}
 
       {/* Conditional Rendering Based on Tabs */}
       {tab === "dashboard" && (
@@ -2893,12 +3559,204 @@ function DashboardContent() {
         </div>
       )}
 
+      {/* Secure Folder Lock/Setup Panel */}
+      {tab === "secure-folder" && !isSecureUnlocked && (
+        <div
+          className="glass-card animate-fade-in"
+          style={{
+            maxWidth: "500px",
+            margin: "2rem auto",
+            padding: "2.5rem 2rem",
+            borderRadius: "20px",
+            border: "1px solid var(--border-default)",
+            background: "var(--bg-card)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "1.5rem",
+            boxShadow: "var(--glass-shadow)",
+            textAlign: "center",
+            width: "100%",
+          }}
+        >
+          {!hasSecurePassword ? (
+            <>
+              <div
+                className="animate-float"
+                style={{
+                  width: "64px",
+                  height: "64px",
+                  borderRadius: "50%",
+                  background: "rgba(245, 158, 11, 0.1)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#F59E0B",
+                  marginBottom: "0.5rem",
+                }}
+              >
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                <h3 style={{ fontSize: "1.3rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.02em", margin: 0 }}>
+                  Configure Secure Folder
+                </h3>
+                <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", fontWeight: 500, margin: 0, lineHeight: "1.4" }}>
+                  Set up a secure passcode to encrypt and protect your private documents. Verification is sent to your Telegram Saved Messages.
+                </p>
+              </div>
+
+              {!secureOtpSent ? (
+                <button
+                  onClick={handleSendSecureOtp}
+                  disabled={isSecureLoading}
+                  className="btn btn-primary"
+                  style={{ width: "100%", height: "46px" }}
+                >
+                  {isSecureLoading ? "Sending Code..." : "Send Verification Code"}
+                </button>
+              ) : (
+                <form
+                  onSubmit={handleSetupSecurePassword}
+                  style={{ display: "flex", flexDirection: "column", gap: "1rem", width: "100%" }}
+                >
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", textAlign: "left" }}>
+                    <label style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--text-secondary)" }}>
+                      Telegram Verification Code
+                    </label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="Enter 6-digit OTP"
+                      value={secureOtp}
+                      onChange={(e) => setSecureOtp(e.target.value)}
+                      maxLength={6}
+                      required
+                    />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", textAlign: "left" }}>
+                    <label style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--text-secondary)" }}>
+                      New Secure Password
+                    </label>
+                    <input
+                      type="password"
+                      className="input-field"
+                      placeholder="Create secure password"
+                      value={securePassword}
+                      onChange={(e) => setSecurePassword(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", textAlign: "left" }}>
+                    <label style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--text-secondary)" }}>
+                      Confirm Secure Password
+                    </label>
+                    <input
+                      type="password"
+                      className="input-field"
+                      placeholder="Confirm secure password"
+                      value={securePasswordConfirm}
+                      onChange={(e) => setSecurePasswordConfirm(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isSecureLoading}
+                    className="btn btn-primary"
+                    style={{ width: "100%", height: "46px", marginTop: "0.5rem" }}
+                  >
+                    {isSecureLoading ? "Setting Password..." : "Set Password & Unlock"}
+                  </button>
+                  <div style={{ display: "flex", justifyContent: "center", gap: "1rem", fontSize: "0.78rem" }}>
+                    <span style={{ color: "var(--text-muted)" }}>Didn't receive it?</span>
+                    <button
+                      type="button"
+                      onClick={handleSendSecureOtp}
+                      style={{ background: "none", border: "none", color: "#F59E0B", fontWeight: 700, cursor: "pointer" }}
+                    >
+                      Resend Code
+                    </button>
+                  </div>
+                </form>
+              )}
+            </>
+          ) : (
+            <>
+              <div
+                style={{
+                  width: "64px",
+                  height: "64px",
+                  borderRadius: "50%",
+                  background: "rgba(245, 158, 11, 0.1)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#F59E0B",
+                  marginBottom: "0.5rem",
+                  boxShadow: "0 0 15px rgba(245, 158, 11, 0.2)",
+                }}
+              >
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                <h3 style={{ fontSize: "1.3rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.02em", margin: 0 }}>
+                  Secure Vault Locked
+                </h3>
+                <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", fontWeight: 500, margin: 0 }}>
+                  Enter your secure password to access your private files.
+                </p>
+              </div>
+
+              <form
+                onSubmit={handleUnlockSecureFolder}
+                style={{ display: "flex", flexDirection: "column", gap: "1rem", width: "100%" }}
+              >
+                <input
+                  type="password"
+                  className="input-field"
+                  placeholder="Enter secure password"
+                  value={securePassword}
+                  onChange={(e) => setSecurePassword(e.target.value)}
+                  required
+                />
+                <button
+                  type="submit"
+                  disabled={isSecureLoading}
+                  className="btn btn-primary"
+                  style={{ width: "100%", height: "46px" }}
+                >
+                  {isSecureLoading ? "Unlocking..." : "Unlock Vault"}
+                </button>
+                <div style={{ display: "flex", justifyContent: "center", gap: "0.5rem", fontSize: "0.78rem" }}>
+                  <button
+                    type="button"
+                    onClick={handleTriggerPasswordReset}
+                    style={{ background: "none", border: "none", color: "var(--text-muted)", fontWeight: 600, cursor: "pointer", transition: "color 0.15s ease" }}
+                  >
+                    Reset Password via Telegram OTP
+                  </button>
+                </div>
+              </form>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Main Files Table Card */}
-      {!(tab === "organizer" && !selectedFolderCategory) &&
+      {tab !== "settings" &&
         tab !== "uploads" &&
         tab !== "favorites" &&
         tab !== "shared" &&
-        tab !== "trash" && (
+        tab !== "trash" &&
+        !(tab === "organizer" && !selectedFolderCategory) &&
+        !(tab === "secure-folder" && !isSecureUnlocked) && (
         <div
           className="glass-card animate-slide-up"
           style={{
@@ -2941,7 +3799,7 @@ function DashboardContent() {
               )}
 
               {/* Dynamic interactive Breadcrumbs */}
-              {(tab === "dashboard" || tab === "my-files") ? (
+              {(tab === "dashboard" || tab === "my-files" || tab === "secure-folder") ? (
                 <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap", fontSize: "0.85rem" }}>
                   <button
                     onClick={() => handleNavigateBreadcrumb(-1)}
@@ -2959,7 +3817,7 @@ function DashboardContent() {
                     }}
                     className="dropdown-item-hover"
                   >
-                    Root
+                    {tab === "secure-folder" ? "Secure Folder" : "Root"}
                   </button>
                   {folderBreadcrumbs.map((bc, idx) => (
                     <div key={bc.id} style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
@@ -2984,6 +3842,111 @@ function DashboardContent() {
                       </button>
                     </div>
                   ))}
+
+                  {(currentFolderId !== null || tab === "secure-folder") && (
+                    <div style={{ position: "relative", display: "inline-block", marginLeft: "0.3rem" }} onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          setIsCurrentFolderUploadMenuOpen(!isCurrentFolderUploadMenuOpen);
+                        }}
+                        style={{
+                          background: darkMode ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)",
+                          border: "none",
+                          borderRadius: "50%",
+                          width: "24px",
+                          height: "24px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          cursor: "pointer",
+                          color: darkMode ? "#ffffff" : "#0f172a",
+                          fontSize: "1rem",
+                          fontWeight: "bold",
+                          transition: "all 0.2s ease",
+                        }}
+                        className="dropdown-item-hover"
+                        title="Upload inside this folder"
+                      >
+                        +
+                      </button>
+
+                      {isCurrentFolderUploadMenuOpen && (
+                        <div
+                          className="glass-card"
+                          style={{
+                            position: "absolute",
+                            left: 0,
+                            top: "100%",
+                            zIndex: 100,
+                            background: darkMode ? "#1e293b" : "#ffffff",
+                            border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
+                            borderRadius: "8px",
+                            padding: "0.35rem",
+                            minWidth: "125px",
+                            boxShadow: darkMode ? "0 10px 15px -3px rgba(0, 0, 0, 0.3)" : "0 10px 15px -3px rgba(15, 23, 42, 0.08)",
+                            marginTop: "4px",
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsCurrentFolderUploadMenuOpen(false);
+                              handleUploadClick(false);
+                            }}
+                            className="dropdown-item-hover"
+                            style={{
+                              width: "100%",
+                              textAlign: "left",
+                              background: "none",
+                              border: "none",
+                              color: darkMode ? "#ffffff" : "#0f172a",
+                              fontSize: "0.74rem",
+                              fontWeight: 700,
+                              padding: "0.45rem 0.65rem",
+                              borderRadius: "6px",
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0.4rem",
+                            }}
+                          >
+                            <span>📄</span>
+                            <span>Upload Files</span>
+                          </button>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsCurrentFolderUploadMenuOpen(false);
+                              handleUploadClick(true);
+                            }}
+                            className="dropdown-item-hover"
+                            style={{
+                              width: "100%",
+                              textAlign: "left",
+                              background: "none",
+                              border: "none",
+                              color: darkMode ? "#ffffff" : "#0f172a",
+                              fontSize: "0.74rem",
+                              fontWeight: 700,
+                              padding: "0.45rem 0.65rem",
+                              borderRadius: "6px",
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0.4rem",
+                            }}
+                          >
+                            <span>📁</span>
+                            <span>Upload Folder</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <h3 style={{ fontSize: "0.98rem", fontWeight: 800, color: darkMode ? "#ffffff" : "#0f172a", letterSpacing: "-0.015em", textTransform: "capitalize" }}>
@@ -3029,7 +3992,7 @@ function DashboardContent() {
               </div>
             )}
 
-            {(tab === "dashboard" || tab === "my-files") && (
+            {(tab === "dashboard" || tab === "my-files" || tab === "secure-folder") && (
               <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexWrap: "wrap" }}>
                 {/* Segemented View Mode Controller */}
                 <div style={{
@@ -3134,7 +4097,7 @@ function DashboardContent() {
                 )}
 
                 {/* Filter & Sort Dropdown Component */}
-                {tab === "my-files" && (
+                {(tab === "my-files" || tab === "secure-folder") && (
                   <div style={{ position: "relative" }}>
                     <button
                       onClick={() => setIsFilterDropdownOpen(!isFilterDropdownOpen)}
@@ -3353,6 +4316,39 @@ function DashboardContent() {
                   New Folder
                 </button>
 
+                {/* Lock Vault Button */}
+                {tab === "secure-folder" && (
+                  <button
+                    onClick={handleLockSecureFolder}
+                    style={{
+                      fontSize: "0.78rem",
+                      fontWeight: 700,
+                      color: "#fff",
+                      background: "linear-gradient(135deg, #ef4444, #dc2626)",
+                      border: "none",
+                      borderRadius: "8px",
+                      padding: "0.45rem 0.85rem",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.35rem",
+                      cursor: "pointer",
+                      boxShadow: "0 2px 8px rgba(239, 68, 68, 0.25)",
+                      transition: "transform 0.15s ease",
+                      height: "32px",
+                      marginLeft: "0.5rem"
+                    }}
+                    onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.96)")}
+                    onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
+                    title="Lock Secure Folder Vault"
+                  >
+                    <svg style={{ width: "0.85rem", height: "0.85rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                    Lock Vault
+                  </button>
+                )}
+
                 {tab === "dashboard" && (
                   <a
                     href="/dashboard?tab=my-files"
@@ -3382,7 +4378,7 @@ function DashboardContent() {
           </div>
 
           {/* Premium Folder Cards Grid Panel */}
-          {(tab === "dashboard" || tab === "my-files") && finalFilteredFiles.filter((f) => f.mimeType === "folder").length > 0 && (
+          {(tab === "dashboard" || tab === "my-files" || tab === "secure-folder") && finalFilteredFiles.filter((f) => f.mimeType === "folder").length > 0 && (
             <div style={{ marginBottom: "1.8rem" }}>
               <h4 style={{ fontSize: "0.76rem", fontWeight: 700, color: darkMode ? "#94a3b8" : "#64748b", marginBottom: "0.8rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                 Folders ({finalFilteredFiles.filter((f) => f.mimeType === "folder").length})
@@ -3393,7 +4389,7 @@ function DashboardContent() {
                   .map((folder) => (
                     <div
                       key={folder.id}
-                      draggable={tab === "my-files" && !isMultiSelectMode}
+                      draggable={tab === "my-files"}
                       onDragStart={(e) => handleDragStart(e, folder as any)}
                       onDragEnd={handleDragEnd}
                       onDragOver={(e) => handleDragOver(e, folder as any)}
@@ -3432,7 +4428,7 @@ function DashboardContent() {
                         transition: "all 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
                       }}
                       className={`folder-card-hover ${
-                        tab === "my-files" && !isMultiSelectMode ? "dnd-draggable" : ""
+                        tab === "my-files" ? "dnd-draggable" : ""
                       } ${draggedItem?.id === folder.id ? "dnd-dragged" : ""} ${
                         dragOverItem?.id === folder.id ? "dnd-dragover" : ""
                       } ${
@@ -3463,7 +4459,7 @@ function DashboardContent() {
                         />
                       )}
 
-                      {/* Actions: 3-dot menu + delete — top-right corner */}
+                      {/* Actions: Direct upload plus, 3-dot menu + delete — top-right corner */}
                       <div
                         style={{
                           position: "absolute",
@@ -3476,11 +4472,124 @@ function DashboardContent() {
                         }}
                         onClick={(e) => e.stopPropagation()}
                       >
+                        {/* Direct upload plus button dropdown container */}
+                        {!isMultiSelectMode && (
+                          <div style={{ position: "relative" }}>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                setActiveUploadFolderMenuId(
+                                  activeUploadFolderMenuId === folder.id ? null : folder.id
+                                );
+                                setActiveMenuFileId(null);
+                              }}
+                              style={{
+                                background: "none",
+                                border: "none",
+                                color: darkMode ? "#94a3b8" : "#64748b",
+                                cursor: "pointer",
+                                padding: "0.2rem",
+                                borderRadius: "4px",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                transition: "all 0.15s ease",
+                              }}
+                              className="dropdown-item-hover"
+                              title={`Upload directly to ${folder.fileName}`}
+                            >
+                              <svg style={{ width: "0.85rem", height: "0.85rem" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                              </svg>
+                            </button>
+
+                            {activeUploadFolderMenuId === folder.id && (
+                              <div
+                                className="glass-card"
+                                style={{
+                                  position: "absolute",
+                                  right: 0,
+                                  top: "100%",
+                                  background: darkMode ? "#1e293b" : "#ffffff",
+                                  border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
+                                  borderRadius: "8px",
+                                  padding: "0.35rem",
+                                  zIndex: 100,
+                                  boxShadow: darkMode ? "0 10px 15px -3px rgba(0, 0, 0, 0.3)" : "0 10px 15px -3px rgba(15, 23, 42, 0.08)",
+                                  minWidth: "125px",
+                                }}
+                              >
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveUploadFolderMenuId(null);
+                                    setUploadTargetFolderId(folder.id);
+                                    setTimeout(() => {
+                                      fileInputRef.current?.click();
+                                    }, 150);
+                                  }}
+                                  className="dropdown-item-hover"
+                                  style={{
+                                    width: "100%",
+                                    textAlign: "left",
+                                    background: "none",
+                                    border: "none",
+                                    color: darkMode ? "#ffffff" : "#0f172a",
+                                    fontSize: "0.74rem",
+                                    fontWeight: 700,
+                                    padding: "0.45rem 0.65rem",
+                                    borderRadius: "6px",
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "0.4rem",
+                                  }}
+                                >
+                                  <span>📄</span>
+                                  <span>Upload Files</span>
+                                </button>
+
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveUploadFolderMenuId(null);
+                                    setUploadTargetFolderId(folder.id);
+                                    setTimeout(() => {
+                                      folderInputRef.current?.click();
+                                    }, 150);
+                                  }}
+                                  className="dropdown-item-hover"
+                                  style={{
+                                    width: "100%",
+                                    textAlign: "left",
+                                    background: "none",
+                                    border: "none",
+                                    color: darkMode ? "#ffffff" : "#0f172a",
+                                    fontSize: "0.74rem",
+                                    fontWeight: 700,
+                                    padding: "0.45rem 0.65rem",
+                                    borderRadius: "6px",
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "0.4rem",
+                                  }}
+                                >
+                                  <span>📁</span>
+                                  <span>Upload Folder</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         <div style={{ position: "relative" }}>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               setActiveMenuFileId(activeMenuFileId === folder.id ? null : folder.id);
+                              setActiveUploadFolderMenuId(null);
                             }}
                             style={{
                               background: "none",
@@ -3697,7 +4806,7 @@ function DashboardContent() {
                       return (
                         <div
                           key={file.id}
-                          draggable={tab === "my-files" && !isMultiSelectMode}
+                          draggable={tab === "my-files"}
                           onDragStart={(e) => handleDragStart(e, file as any)}
                           onDragEnd={handleDragEnd}
                           onDragOver={(e) => handleDragOver(e, file as any)}
@@ -3724,7 +4833,7 @@ function DashboardContent() {
                             boxShadow: "none",
                           }}
                           className={`folder-card-hover ${
-                            tab === "my-files" && !isMultiSelectMode ? "dnd-draggable" : ""
+                            tab === "my-files" ? "dnd-draggable" : ""
                           } ${draggedItem?.id === file.id ? "dnd-dragged" : ""} ${
                             dragOverItem?.id === file.id ? "dnd-dragover" : ""
                           } ${
@@ -4165,6 +5274,7 @@ function DashboardContent() {
                     handleRevokeShare={handleRevokeShare}
                     handleDownload={handleDownload}
                     handleMoveToTrash={handleMoveToTrash}
+                    handleMoveToSecure={handleMoveToSecure}
                     getFileStyle={getFileStyle}
                     classifyFile={classifyFile}
                     renderFileIcon={renderFileIcon}
@@ -4343,6 +5453,238 @@ function DashboardContent() {
           setSelectedDetailsFile={setSelectedDetailsFile}
           handleDownload={handleDownload}
         />
+      )}
+
+      {tab === "settings" && (
+        <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: "1.5rem", width: "100%", maxWidth: "800px", margin: "0 auto" }}>
+          {/* Settings Header */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+            <h2 style={{ fontSize: "1.45rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.03em" }}>Settings</h2>
+            <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", fontWeight: 500 }}>
+              Manage your CloudBridge account configurations and security parameters.
+            </p>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "240px 1fr", gap: "1.5rem", width: "100%" }}>
+            {/* Sidebar navigation for settings */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+              <button
+                onClick={() => setSettingsView("change")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.6rem",
+                  padding: "0.65rem 0.85rem",
+                  borderRadius: "8px",
+                  border: "1px solid " + (settingsView === "change" ? "rgba(245, 158, 11, 0.2)" : "transparent"),
+                  background: settingsView === "change" ? "rgba(245, 158, 11, 0.08)" : "transparent",
+                  color: settingsView === "change" ? "#F59E0B" : "var(--text-secondary)",
+                  fontSize: "0.85rem",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+                Change Vault Password
+              </button>
+              <button
+                onClick={() => setSettingsView("forgot")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.6rem",
+                  padding: "0.65rem 0.85rem",
+                  borderRadius: "8px",
+                  border: "1px solid " + (settingsView === "forgot" ? "rgba(245, 158, 11, 0.2)" : "transparent"),
+                  background: settingsView === "forgot" ? "rgba(245, 158, 11, 0.08)" : "transparent",
+                  color: settingsView === "forgot" ? "#F59E0B" : "var(--text-secondary)",
+                  fontSize: "0.85rem",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 2v6h-6" />
+                  <path d="M21 13a9 9 0 1 1-3-7.7L21 8" />
+                </svg>
+                Recover Vault (Forgot)
+              </button>
+            </div>
+
+            {/* Active view component */}
+            <div className="glass-card animate-slide-up" style={{ padding: "1.5rem", borderRadius: "14px", border: "1px solid var(--border-default)", background: "var(--bg-card)", display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+              {settingsView === "change" ? (
+                <form onSubmit={handleSettingsChangePassword} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                    <h3 style={{ fontSize: "1.05rem", fontWeight: 800, color: "var(--text-primary)", margin: 0 }}>Change Vault Password</h3>
+                    <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", margin: 0 }}>Update your Secure Folder security password.</p>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.8rem" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                      <label style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-secondary)" }}>Current Password</label>
+                      <input
+                        type="password"
+                        placeholder="Enter current password"
+                        value={settingsOldPassword}
+                        onChange={(e) => setSettingsOldPassword(e.target.value)}
+                        className="input-field"
+                        required
+                        disabled={settingsIsLoading}
+                      />
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                      <label style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-secondary)" }}>New Password</label>
+                      <input
+                        type="password"
+                        placeholder="Enter new password"
+                        value={settingsNewPassword}
+                        onChange={(e) => setSettingsNewPassword(e.target.value)}
+                        className="input-field"
+                        required
+                        disabled={settingsIsLoading}
+                      />
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                      <label style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-secondary)" }}>Confirm New Password</label>
+                      <input
+                        type="password"
+                        placeholder="Confirm new password"
+                        value={settingsConfirmNewPassword}
+                        onChange={(e) => setSettingsConfirmNewPassword(e.target.value)}
+                        className="input-field"
+                        required
+                        disabled={settingsIsLoading}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.5rem" }}>
+                    <button
+                      type="button"
+                      onClick={() => setSettingsView("forgot")}
+                      style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer", padding: 0 }}
+                      className="hover-underline"
+                    >
+                      Forgot password?
+                    </button>
+
+                    <button
+                      type="submit"
+                      className="btn btn-primary"
+                      style={{ height: "38px", padding: "0 1.25rem" }}
+                      disabled={settingsIsLoading}
+                    >
+                      {settingsIsLoading ? "Updating..." : "Update Password"}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleSettingsResetPassword} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                    <h3 style={{ fontSize: "1.05rem", fontWeight: 800, color: "var(--text-primary)", margin: 0 }}>Reset Vault Password</h3>
+                    <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", margin: 0 }}>
+                      Recover your Secure Folder vault using your Telegram verification OTP.
+                    </p>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.8rem" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                      <label style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-secondary)" }}>Verification Code</label>
+                      <div style={{ display: "flex", gap: "0.5rem" }}>
+                        <input
+                          type="text"
+                          placeholder="6-digit OTP code"
+                          value={settingsOtp}
+                          onChange={(e) => setSettingsOtp(e.target.value)}
+                          className="input-field"
+                          required
+                          disabled={settingsIsLoading || !settingsOtpSent}
+                          style={{ flex: 1 }}
+                        />
+                        <button
+                          type="button"
+                          onClick={handleSettingsSendOtp}
+                          disabled={settingsIsLoading}
+                          className="btn"
+                          style={{
+                            background: "rgba(245, 158, 11, 0.12)",
+                            border: "1px solid rgba(245, 158, 11, 0.2)",
+                            color: "#F59E0B",
+                            fontWeight: 700,
+                            padding: "0 1rem",
+                            fontSize: "0.8rem",
+                            whiteSpace: "nowrap"
+                          }}
+                        >
+                          {settingsOtpSent ? "Resend OTP" : "Send OTP"}
+                        </button>
+                      </div>
+                      <span style={{ fontSize: "0.68rem", color: "var(--text-muted)" }}>
+                        The verification code will be sent to your Telegram Saved Messages chat.
+                      </span>
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                      <label style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-secondary)" }}>New Password</label>
+                      <input
+                        type="password"
+                        placeholder="Enter new password"
+                        value={settingsNewPassword}
+                        onChange={(e) => setSettingsNewPassword(e.target.value)}
+                        className="input-field"
+                        required
+                        disabled={settingsIsLoading || !settingsOtpSent}
+                      />
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                      <label style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-secondary)" }}>Confirm New Password</label>
+                      <input
+                        type="password"
+                        placeholder="Confirm new password"
+                        value={settingsConfirmNewPassword}
+                        onChange={(e) => setSettingsConfirmNewPassword(e.target.value)}
+                        className="input-field"
+                        required
+                        disabled={settingsIsLoading || !settingsOtpSent}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.5rem" }}>
+                    <button
+                      type="button"
+                      onClick={() => setSettingsView("change")}
+                      style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer", padding: 0 }}
+                      className="hover-underline"
+                    >
+                      Back to Change Password
+                    </button>
+
+                    <button
+                      type="submit"
+                      className="btn btn-primary"
+                      style={{ height: "38px", padding: "0 1.25rem" }}
+                      disabled={settingsIsLoading || !settingsOtpSent}
+                    >
+                      {settingsIsLoading ? "Resetting..." : "Reset Password"}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Global Bottom Sticky Upload Progress HUD Widget */}
@@ -4586,7 +5928,16 @@ function DashboardContent() {
                 lineHeight: "1.4",
               }}
             >
-              You are merging <strong>{mergeModal.fileA.fileName}</strong> and <strong>{mergeModal.fileB.fileName}</strong>. Enter a folder name below to group them.
+              {mergeModal.filesToMerge.length === 1 ? (
+                <>
+                  You are merging <strong>{mergeModal.filesToMerge[0].fileName}</strong> and <strong>{mergeModal.targetFile.fileName}</strong>.
+                </>
+              ) : (
+                <>
+                  You are merging <strong>{mergeModal.filesToMerge.length} items</strong> and <strong>{mergeModal.targetFile.fileName}</strong>.
+                </>
+              )}
+              {" "}Enter a folder name below to group them.
             </p>
 
             <form
@@ -4718,14 +6069,73 @@ function DashboardContent() {
 
             {/* Action Buttons */}
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+              {/* Move to Secure Vault */}
+              {tab !== "secure-folder" && (
+                <button
+                  onClick={async () => {
+                    const password = await promptSecurePassword();
+                    if (!password) return;
+                    setIsBatchActiveDeleting(true);
+                    try {
+                      const unlockRes = await fetch("/api/auth/secure-folder/unlock", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ password }),
+                      });
+                      const unlockJson = await unlockRes.json();
+                      if (!unlockJson.success) {
+                        showToast("error", "Incorrect secure password. Action aborted.");
+                        return;
+                      }
+
+                      const res = await fetch("/api/files/batch", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ fileIds: selectedActiveIdsArray, isSecure: true, parentId: null }),
+                      });
+                      const json = await res.json();
+                      if (json.success) {
+                        showToast("success", `Moved ${selectedActiveIdsArray.length} items to Secure Folder.`);
+                        setSelectedActiveIds({});
+                        fetchFiles(currentFolderId);
+                        fetchAllFiles();
+                      } else {
+                        showToast("error", json.message || "Failed to secure items.");
+                      }
+                    } catch {
+                      showToast("error", "An error occurred.");
+                    } finally {
+                      setIsBatchActiveDeleting(false);
+                    }
+                  }}
+                  disabled={isBatchActiveDeleting}
+                  style={{
+                    background: "rgba(245, 158, 11, 0.12)",
+                    border: "1px solid rgba(245, 158, 11, 0.2)",
+                    color: "#F59E0B",
+                    cursor: "pointer",
+                    padding: "0.45rem 1rem",
+                    borderRadius: "8px",
+                    fontSize: "0.8rem",
+                    fontWeight: 700,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.4rem",
+                    transition: "all 0.2s ease",
+                  }}
+                >
+                  Move to Vault
+                </button>
+              )}
+
               {/* Move to Trash */}
               <button
                 onClick={() => handleBatchMoveToTrash(selectedActiveIdsArray)}
                 disabled={isBatchActiveDeleting}
                 style={{
-                  background: "rgba(245, 158, 11, 0.12)",
-                  border: "1px solid rgba(245, 158, 11, 0.2)",
-                  color: "#F59E0B",
+                  background: "rgba(239, 68, 68, 0.12)",
+                  border: "1px solid rgba(239, 68, 68, 0.2)",
+                  color: "#EF4444",
                   cursor: "pointer",
                   padding: "0.45rem 1rem",
                   borderRadius: "8px",
@@ -5394,6 +6804,125 @@ function DashboardContent() {
             ) : (
               <span>Zoom: {Math.round(imageZoom * 100)}% • Rotation: {imageRotation}° • Controls: Arrow Keys (Nav) • Esc (Exit) • +/- (Zoom)</span>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Premium Secure Upload/Action Password Prompt Modal */}
+      {secureUploadPrompt?.isOpen && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.4)",
+            backdropFilter: "blur(8px)",
+            zIndex: 999999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "1rem",
+            animation: "fadeIn 0.2s ease-out",
+          }}
+        >
+          <div
+            className="glass-card"
+            style={{
+              width: "380px",
+              background: "var(--bg-card)",
+              border: "1px solid var(--border-default)",
+              borderRadius: "14px",
+              padding: "1.5rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: "1.25rem",
+              boxShadow: "var(--glass-shadow)",
+              textAlign: "center",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <div
+                style={{
+                  width: "48px",
+                  height: "48px",
+                  borderRadius: "50%",
+                  background: "rgba(245, 158, 11, 0.1)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#F59E0B",
+                }}
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+              <h3 style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.02em", margin: 0 }}>
+                Enter Secure Password
+              </h3>
+              <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", fontWeight: 500, margin: 0 }}>
+                Verify password to perform secure operation.
+              </p>
+            </div>
+
+            <input
+              id="secure-prompt-input"
+              type="password"
+              className="input-field"
+              placeholder="Secure password"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const val = (e.target as HTMLInputElement).value;
+                  secureUploadPrompt.onConfirm(val);
+                }
+              }}
+              autoFocus
+            />
+
+            <div style={{ display: "flex", gap: "0.75rem", width: "100%" }}>
+              <button
+                onClick={() => secureUploadPrompt.onCancel()}
+                style={{
+                  flex: 1,
+                  padding: "0.65rem",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border-default)",
+                  background: "var(--bg-secondary)",
+                  color: "var(--text-primary)",
+                  fontWeight: 700,
+                  fontSize: "0.85rem",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const input = document.getElementById("secure-prompt-input") as HTMLInputElement;
+                  if (input) secureUploadPrompt.onConfirm(input.value);
+                }}
+                style={{
+                  flex: 1,
+                  padding: "0.65rem",
+                  borderRadius: "8px",
+                  background: "#F59E0B",
+                  color: "#ffffff",
+                  border: "none",
+                  fontWeight: 700,
+                  fontSize: "0.85rem",
+                  cursor: "pointer",
+                  boxShadow: "0 2px 6px rgba(245, 158, 11, 0.2)",
+                }}
+              >
+                Confirm
+              </button>
+            </div>
           </div>
         </div>
       )}

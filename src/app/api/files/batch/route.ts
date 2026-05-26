@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { getCurrentUserId } from "@/services/auth/auth.service";
 import { prisma } from "@/lib/prisma";
+import { getJSON } from "@/lib/redis";
 import { createLogger } from "@/lib/logger";
 import {
   getClientForUser,
@@ -76,6 +77,28 @@ async function recursivelySoftDelete(folderId: string) {
   }
 }
 
+async function recursivelySetSecure(folderId: string, isSecure: boolean) {
+  await prisma.file.update({
+    where: { id: folderId },
+    data: { isSecure },
+  });
+
+  const children = await prisma.file.findMany({
+    where: { parentId: folderId },
+  });
+
+  for (const child of children) {
+    if (child.mimeType === "folder") {
+      await recursivelySetSecure(child.id, isSecure);
+    } else {
+      await prisma.file.update({
+        where: { id: child.id },
+        data: { isSecure },
+      });
+    }
+  }
+}
+
 /**
  * DELETE: Bulk permanently delete files and folders from database and Telegram
  */
@@ -103,6 +126,14 @@ export async function DELETE(request: NextRequest) {
 
     if (filesToDelete.length === 0) {
       return successResponse(null, "No files found to delete.");
+    }
+
+    const hasSecure = filesToDelete.some((f) => f.isSecure);
+    if (hasSecure) {
+      const isUnlocked = (await getJSON<string>(`secure_unlocked:${userId}`)) === "true";
+      if (!isUnlocked) {
+        return errorResponse("Secure folder is locked. Please unlock it first.", 403);
+      }
     }
 
     const user = await prisma.user.findUnique({
@@ -196,13 +227,9 @@ export async function PATCH(request: NextRequest) {
       return errorResponse("Not authenticated.", 401);
     }
 
-    const { fileIds, isDeleted } = await request.json();
+    const { fileIds, isDeleted, isSecure, parentId } = await request.json();
     if (!fileIds || !Array.isArray(fileIds) || fileIds.length === 0) {
       return errorResponse("Invalid or empty fileIds list.", 400);
-    }
-
-    if (typeof isDeleted !== "boolean") {
-      return errorResponse("isDeleted parameter is required and must be a boolean.", 400);
     }
 
     // Fetch the targets to ensure they belong to the user
@@ -217,25 +244,60 @@ export async function PATCH(request: NextRequest) {
       return successResponse(null, "No files found to restore.");
     }
 
-    // Perform DB updates
-    for (const file of filesToUpdate) {
-      if (file.mimeType === "folder") {
-        if (isDeleted === false) {
-          await recursivelyRestore(file.id);
-        } else {
-          await recursivelySoftDelete(file.id);
-        }
-      } else {
-        await prisma.file.update({
-          where: { id: file.id },
-          data: { isDeleted },
-        });
+    const hasSecure = filesToUpdate.some((f) => f.isSecure) || isSecure === true;
+    if (hasSecure) {
+      const isUnlocked = (await getJSON<string>(`secure_unlocked:${userId}`)) === "true";
+      if (!isUnlocked) {
+        return errorResponse("Secure folder is locked. Please unlock it first.", 403);
       }
     }
 
-    log.info("Batch updated files/folders isDeleted state", {
+    // Perform DB updates
+    for (const file of filesToUpdate) {
+      if (typeof isSecure === "boolean") {
+        if (file.mimeType === "folder") {
+          await recursivelySetSecure(file.id, isSecure);
+        } else {
+          await prisma.file.update({
+            where: { id: file.id },
+            data: { isSecure },
+          });
+        }
+      }
+
+      if (typeof isDeleted === "boolean") {
+        if (file.mimeType === "folder") {
+          if (isDeleted === false) {
+            await recursivelyRestore(file.id);
+          } else {
+            await recursivelySoftDelete(file.id);
+          }
+        } else {
+          await prisma.file.update({
+            where: { id: file.id },
+            data: { isDeleted },
+          });
+        }
+      }
+    }
+
+    if (parentId !== undefined) {
+      await prisma.file.updateMany({
+        where: {
+          id: { in: fileIds },
+          userId,
+        },
+        data: {
+          parentId,
+        },
+      });
+    }
+
+    log.info("Batch updated files/folders properties", {
       count: filesToUpdate.length,
       isDeleted,
+      isSecure,
+      parentId,
     });
 
     return successResponse(null, "Selected items updated successfully.");
