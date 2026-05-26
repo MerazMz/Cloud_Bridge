@@ -23,6 +23,7 @@ export function QrLoginForm({ onToggleMethod }: QrLoginFormProps) {
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const isSuccessRef = useRef(false);
+  const animationFrameRef = useRef<number | null>(null);
 
   // Dynamic Theme mutation listener
   useEffect(() => {
@@ -75,30 +76,58 @@ export function QrLoginForm({ onToggleMethod }: QrLoginFormProps) {
 
     // Load Telegram circular icon image centered
     const img = new Image();
-    img.src = "/qrImage.png";
+    img.src = "/cloudbridgeqr.png";
 
-    const drawAll = () => {
+    // High-DPI screen scaling setup (done once per render trigger)
+    const dpi = window.devicePixelRatio || 2;
+    const displaySize = 230;
+    canvas.width = displaySize * dpi;
+    canvas.height = displaySize * dpi;
+    canvas.style.width = `${displaySize}px`;
+    canvas.style.height = `${displaySize}px`;
+
+    const startAnimation = () => {
+      // Clean up previous animation frame if any
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+
+      let startTime: number | null = null;
+      const duration = 1200; // Premium 1.2s sweep animation
+
+      const animate = (timestamp: number) => {
+        if (!startTime) startTime = timestamp;
+        const elapsed = timestamp - startTime;
+        const progress = Math.min(1, elapsed / duration);
+
+        drawFrame(progress);
+
+        if (progress < 1) {
+          animationFrameRef.current = requestAnimationFrame(animate);
+        } else {
+          animationFrameRef.current = null;
+        }
+      };
+
+      animationFrameRef.current = requestAnimationFrame(animate);
+    };
+
+    const drawFrame = (t: number) => {
       try {
         // Generate standard QR matrix with High Error Correction
         const qr = QRCode.create(url, { errorCorrectionLevel: "H" });
         const modules = qr.modules;
         const size = modules.size;
 
-        // High-DPI screen scaling
-        const dpi = window.devicePixelRatio || 2;
-        const displaySize = 230;
-        canvas.width = displaySize * dpi;
-        canvas.height = displaySize * dpi;
-        canvas.style.width = `${displaySize}px`;
-        canvas.style.height = `${displaySize}px`;
-        ctx.scale(dpi, dpi);
-
         const width = displaySize;
         const height = displaySize;
         const cellSize = width / size;
 
-        // 1. Keep canvas background transparent to match the card perfectly
-        ctx.clearRect(0, 0, width, height);
+        // 1. Clear background
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        ctx.save();
+        ctx.scale(dpi, dpi);
 
         // Skips corner finders and center regions
         const isFinder = (r: number, c: number) => {
@@ -112,24 +141,59 @@ export function QrLoginForm({ onToggleMethod }: QrLoginFormProps) {
           const centerX = (size - 1) / 2;
           const centerY = (size - 1) / 2;
           const dist = Math.sqrt(Math.pow(r - centerY, 2) + Math.pow(c - centerX, 2));
-          return dist < 5.2; // Perfectly skips dots in the logo area + premium padding
+          return dist < 5.2; // Skip logo area + padding
         };
 
-        // 2. Draw standard dots as dynamic rounded circles
+        // Easing functions
+        const easeOutBack = (x: number): number => {
+          const c1 = 1.70158;
+          const c3 = c1 + 1;
+          return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+        };
+
+        const easeOutQuad = (x: number): number => {
+          return 1 - (1 - x) * (1 - x);
+        };
+
+        // 2. Draw standard dots generated completely randomly across the grid
         ctx.fillStyle = isDarkTheme ? "#FFFFFF" : "#0F172A"; // white dots in dark, slate in light
+        
+        const dotStart = 0.2;
+        const dotEnd = 0.85;
+        const pDuration = 0.15;
+        const maxDelay = dotEnd - dotStart - pDuration;
+
+        // Deterministic pseudo-random generator based on row and col coordinates
+        const getPseudoRandom = (r: number, c: number) => {
+          const val = Math.sin(r * 12.9898 + c * 78.233) * 43758.5453;
+          return val - Math.floor(val);
+        };
+
         for (let r = 0; r < size; r++) {
           for (let c = 0; c < size; c++) {
             if (modules.get(r, c)) {
               if (isFinder(r, c) || isCenter(r, c)) {
                 continue;
               }
+
+              const rand = getPseudoRandom(r, c);
+              const pStart = dotStart + rand * maxDelay;
+
+              let scale = 0;
+              if (t >= pStart) {
+                const dt = Math.min(1, (t - pStart) / pDuration);
+                scale = easeOutQuad(dt);
+              }
+
+              if (scale <= 0) continue;
+
               const x = c * cellSize;
               const y = r * cellSize;
-
-              ctx.beginPath();
               const rx = x + cellSize / 2;
               const ry = y + cellSize / 2;
-              const rad = cellSize * 0.45;
+              const rad = cellSize * 0.45 * scale;
+
+              ctx.beginPath();
               ctx.arc(rx, ry, rad, 0, 2 * Math.PI);
               ctx.fill();
             }
@@ -174,25 +238,68 @@ export function QrLoginForm({ onToggleMethod }: QrLoginFormProps) {
           );
         };
 
-        drawFinder(0, 0); // Top-Left
-        drawFinder((size - 7) * cellSize, 0); // Top-Right
-        drawFinder(0, (size - 7) * cellSize); // Bottom-Left
+        const drawScaledFinder = (x: number, y: number, finderIndex: number) => {
+          // Finders pop in sequentially from top-left, to top-right, to bottom-left
+          const fStart = finderIndex * 0.08;
+          const fEnd = fStart + 0.3;
+          let scale = 0;
+          if (t >= fStart) {
+            const ft = Math.min(1, (t - fStart) / (fEnd - fStart));
+            scale = easeOutBack(ft);
+          }
 
-        // 4. Draw dynamic/centered transparent Telegram Logo image (background is transparent since modules are skipped in isCenter)
-        const cx = width / 2;
-        const cy = height / 2;
-        const logoSize = cellSize * 9.5;
-        ctx.drawImage(img, cx - logoSize / 2, cy - logoSize / 2, logoSize, logoSize);
+          if (scale <= 0) return;
 
+          const cx = x + 3.5 * cellSize;
+          const cy = y + 3.5 * cellSize;
+
+          ctx.save();
+          ctx.translate(cx, cy);
+          ctx.scale(scale, scale);
+          ctx.translate(-cx, -cy);
+          drawFinder(x, y);
+          ctx.restore();
+        };
+
+        drawScaledFinder(0, 0, 0); // Top-Left
+        drawScaledFinder((size - 7) * cellSize, 0, 1); // Top-Right
+        drawScaledFinder(0, (size - 7) * cellSize, 2); // Bottom-Left
+
+        // 4. Draw central logo image centered, scaling and fading in at the end
+        const logoStart = 0.75;
+        const logoEnd = 1.0;
+        let logoScale = 0;
+        let logoAlpha = 0;
+        if (t >= logoStart) {
+          const lt = Math.min(1, (t - logoStart) / (logoEnd - logoStart));
+          logoScale = easeOutBack(lt);
+          logoAlpha = lt;
+        }
+
+        if (logoScale > 0) {
+          const cx = width / 2;
+          const cy = height / 2;
+          const logoSize = cellSize * 9.5;
+
+          ctx.save();
+          ctx.translate(cx, cy);
+          ctx.scale(logoScale, logoScale);
+          ctx.translate(-cx, -cy);
+          ctx.globalAlpha = logoAlpha;
+          ctx.drawImage(img, cx - logoSize / 2, cy - logoSize / 2, logoSize, logoSize);
+          ctx.restore();
+        }
+
+        ctx.restore();
       } catch (err) {
         console.error("Premium QR renderer error:", err);
       }
     };
 
     if (img.complete) {
-      drawAll();
+      startAnimation();
     } else {
-      img.onload = drawAll;
+      img.onload = startAnimation;
     }
   };
 
@@ -243,6 +350,9 @@ export function QrLoginForm({ onToggleMethod }: QrLoginFormProps) {
     return () => {
       stopPolling();
       stopCountdown();
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
     };
   }, []);
 
@@ -474,6 +584,8 @@ export function QrLoginForm({ onToggleMethod }: QrLoginFormProps) {
         {status === "pending" && (
           <canvas
             ref={canvasRef}
+            role="img"
+            aria-label="QR Code to log in to CloudBridge"
             style={{
               width: "100%",
               height: "100%",

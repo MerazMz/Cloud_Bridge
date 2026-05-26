@@ -110,7 +110,7 @@ export function PhoneForm({ onToggleMethod }: PhoneFormProps) {
     >
       {/* Centered Telegram Circular Logo */}
       <img
-        src="/qrImage.png"
+        src="/cloudbridgeqr.png"
         alt="Telegram Logo"
         style={{
           width: "100px",
