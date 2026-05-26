@@ -6,6 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { setWithTTL, getJSON, del } from "@/lib/redis";
 import { createLogger } from "@/lib/logger";
 import type { JWTPayload, OtpState, AuthTokens } from "@/types/auth.types";
+import { encryptSession } from "@/services/crypto/crypto.service";
+import { ensureStorageChannel, type TelegramUserInfo } from "@/services/telegram/telegram.service";
 
 const log = createLogger("AuthService");
 
@@ -296,4 +298,88 @@ export async function cleanupExpiredSessions(): Promise<number> {
   });
   log.info("Expired sessions cleaned up", { count: result.count });
   return result.count;
+}
+
+/**
+ * Finalize user login after a successful Telegram session is established (OTP or QR scan).
+ * Encrypts the session, ensures the storage channel exists, upserts the user in the database,
+ * and sets auth cookies.
+ */
+export async function finalizeUserLogin(
+  user: TelegramUserInfo,
+  sessionString: string,
+  userAgent?: string,
+  ipAddress?: string
+) {
+  // Encrypt the Telegram session
+  const encrypted = encryptSession(sessionString);
+
+  const phoneNumber = user.phone;
+
+  // Upsert user in database immediately (speeding up response time by ~5 seconds!)
+  const dbUser = await prisma.user.upsert({
+    where: { telegramUserId: user.telegramUserId },
+    update: {
+      phoneNumber,
+      telegramAccessHash: user.accessHash,
+      telegramSessionEncrypted: encrypted.encrypted,
+      telegramSessionIv: encrypted.iv,
+      telegramSessionAuthTag: encrypted.authTag,
+      displayName: user.displayName,
+      username: user.username || null,
+      updatedAt: new Date(),
+    },
+    create: {
+      phoneNumber,
+      telegramUserId: user.telegramUserId,
+      telegramAccessHash: user.accessHash,
+      telegramSessionEncrypted: encrypted.encrypted,
+      telegramSessionIv: encrypted.iv,
+      telegramSessionAuthTag: encrypted.authTag,
+      displayName: user.displayName,
+      username: user.username || null,
+    },
+  });
+
+  // Ensure storage channel exists in the background without blocking the login redirect response
+  (async () => {
+    try {
+      const channel = await ensureStorageChannel(
+        sessionString,
+        user.telegramUserId
+      );
+      
+      await prisma.user.update({
+        where: { id: dbUser.id },
+        data: {
+          storageChannelId: channel.channelId,
+          storageChannelAccessHash: channel.accessHash,
+        },
+      });
+      log.info("Background storage channel verification completed successfully", {
+        userId: dbUser.id,
+      });
+    } catch (channelError) {
+      log.warn("Background storage channel verification failed — will automatically retry on first file upload", {
+        error: channelError,
+      });
+    }
+  })();
+
+  // Create auth tokens
+  const tokens = await createAuthTokens(dbUser.id, userAgent, ipAddress);
+
+  // Set HttpOnly cookies
+  await setAuthCookies(tokens.accessToken, tokens.refreshToken);
+
+  log.info("finalizeUserLogin completed successfully", {
+    userId: dbUser.id,
+    telegramUserId: user.telegramUserId.toString(),
+  });
+
+  return {
+    userId: dbUser.id,
+    displayName: user.displayName,
+    username: user.username,
+  };
 }

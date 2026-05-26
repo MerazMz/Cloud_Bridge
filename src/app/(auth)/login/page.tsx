@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { PhoneForm } from "@/components/auth/phone-form";
+import { QrLoginForm } from "@/components/auth/qr-login-form";
 import Image from "next/image";
 
 export default function LoginPage() {
   const [isDark, setIsDark] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [loginMethod, setLoginMethod] = useState<"phone" | "qr">("qr");
 
   // Initialize theme on client-side mount
   useEffect(() => {
@@ -276,163 +278,36 @@ export default function LoginPage() {
         }
       ` }} />
 
-      {/* Main Single Card enclosing everything */}
-      <div className="unified-auth-card">
-        {/* Top Header Bar inside the card */}
-        <header
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            width: "100%",
-          }}
-        >
-          {/* Brand Logo */}
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <div
-              style={{
-                width: "30px",
-                height: "30px",
-                borderRadius: "0.5rem",
-                background: "linear-gradient(135deg, #FFA800 0%, #FF7A00 100%)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                boxShadow: "0 3px 8px rgba(255, 122, 0, 0.15)",
-              }}
-            >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#ffffff"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-              </svg>
-            </div>
-            <h1
-              style={{
-                fontSize: "1.25rem",
-                fontWeight: 800,
-                letterSpacing: "-0.04em",
-                display: "flex",
-                alignItems: "center",
-              }}
-            >
-              <span style={{ color: "var(--text-primary)" }}>Cloud</span>
-              <span style={{ color: "#FFA800" }}>Bridge</span>
-            </h1>
-          </div>
+      {/* Dynamic Theme selector button placed in a sleek, absolute minimalist position at top-right */}
+      <div
+        style={{
+          position: "absolute",
+          top: "1.5rem",
+          right: "1.5rem",
+          zIndex: 10,
+        }}
+      >
+        {renderThemeButton()}
+      </div>
 
-          {/* Dynamic Theme selector button */}
-          {renderThemeButton()}
-        </header>
-
-        {/* Mid section: Info and 3D Graphic */}
-        <div className="login-grid">
-          {/* Left info column */}
-          <div className="login-left">
-            <div>
-              <h2 className="hero-title">
-                Welcome to <br />
-                <span style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}>
-                  <span>Cloud</span>
-                  <span style={{ color: "#FFA800" }}>Bridge</span>
-                  <span>👋</span>
-                </span>
-              </h2>
-              <p className="hero-desc">
-                Your secure cloud storage on Telegram. <br />
-                Fast, private and always with you.
-              </p>
-            </div>
-
-            {/* Features Checklist */}
-            <div className="features-list">
-              {/* Feature 1 */}
-              <div className="feature-item">
-                <div className="feature-icon-wrapper">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                  </svg>
-                </div>
-                <div>
-                  <h4 className="feature-title">End-to-End Secure</h4>
-                  <p className="feature-desc">Your files are encrypted and safe.</p>
-                </div>
-              </div>
-
-              {/* Feature 2 */}
-              <div className="feature-item">
-                <div className="feature-icon-wrapper">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                  </svg>
-                </div>
-                <div>
-                  <h4 className="feature-title">Blazing Fast</h4>
-                  <p className="feature-desc">Upload, access and share instantly.</p>
-                </div>
-              </div>
-
-              {/* Feature 3 */}
-              <div className="feature-item">
-                <div className="feature-icon-wrapper">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
-                  </svg>
-                </div>
-                <div>
-                  <h4 className="feature-title">Anywhere Access</h4>
-                  <p className="feature-desc">Access your data from any device.</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Right 3D Column */}
-          <div className="login-right">
-            <div className="floating-model-wrapper animate-float">
-              <Image
-                src="/cloud_model.png"
-                alt="CloudBridge 3D Secure Cloud Storage illustration"
-                width={260}
-                height={260}
-                priority
-                style={{
-                  objectFit: "contain",
-                  maxWidth: "100%",
-                  height: "auto",
-                }}
-              />
-            </div>
-          </div>
+      {/* Main Single Centered Form Box matching official Telegram login */}
+      <div
+        style={{
+          width: "100%",
+          maxWidth: "380px",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: "1.5rem",
+        }}
+      >
+        <div className="form-centered-row animate-fade-in" key={loginMethod} style={{ width: "100%" }}>
+          {loginMethod === "phone" ? (
+            <PhoneForm onToggleMethod={setLoginMethod} />
+          ) : (
+            <QrLoginForm onToggleMethod={setLoginMethod} />
+          )}
         </div>
-
-        {/* Bottom section: Phone Number Input form in centered card row */}
-        <div className="form-centered-row ">
-          <PhoneForm />
-        </div>
-
-        {/* Footer inside the card at bottom */}
-        {/* <footer
-          style={{
-            width: "100%",
-            textAlign: "center",
-            padding: "1.25rem 0 0 0",
-            color: "var(--text-muted)",
-            fontSize: "0.8rem",
-            fontWeight: 500,
-            borderTop: "1px solid var(--border-default)",
-            marginTop: "0.5rem",
-          }}
-        >
-          <span>© 2025 CloudBridge. All rights reserved.</span>
-        </footer> */}
       </div>
     </div>
   );

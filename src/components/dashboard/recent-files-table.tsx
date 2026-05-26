@@ -276,13 +276,13 @@ export function RecentFilesTable({
                       </div>
                     );
                   })()}
-                  <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", overflow: "hidden" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", overflow: "hidden", minWidth: 0, flex: 1 }}>
                     <span
                       title={file.fileName}
                       style={{
                         fontWeight: 700,
                         fontSize: "0.82rem",
-                        color: "var(--text-primary)",
+                        color: darkMode ? "#ffffff" : "var(--text-primary)",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
@@ -291,19 +291,6 @@ export function RecentFilesTable({
                       {file.fileName}
                     </span>
                   </div>
-                  <span
-                    title={file.fileName}
-                    style={{
-                      fontWeight: 700,
-                      fontSize: "0.82rem",
-                      color: darkMode ? "#ffffff" : "#0f172a",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {file.fileName}
-                  </span>
                 </div>
               </td>
 
