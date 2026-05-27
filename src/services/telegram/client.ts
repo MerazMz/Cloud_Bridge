@@ -1,6 +1,5 @@
 import { TelegramClient } from "telegram";
 import { ConnectionTCPObfuscated } from "telegram/network";
-import { PromisedWebSockets } from "telegram/extensions";
 import { StringSession } from "telegram/sessions";
 import { LogLevel } from "telegram/extensions/Logger";
 import { createLogger } from "@/lib/logger";
@@ -25,25 +24,19 @@ export function createTelegramClient(sessionString = ""): TelegramClient {
   }
 
   const session = new StringSession(sessionString);
-  const isProd = process.env.NODE_ENV === "production";
 
   const client = new TelegramClient(session, apiId, apiHash, {
-    ...(isProd
-      ? {
-          networkSocket: PromisedWebSockets,
-          useWSS: true,
-        }
-      : {
-          connection: ConnectionTCPObfuscated,
-          useWSS: false,
-        }),
+    connection: ConnectionTCPObfuscated,
+    useWSS: false, // Keep using raw high-speed TCP socket connections (avoids Node.js SSL IP validation errors)
     connectionRetries: 5,
     retryDelay: 1000,
     autoReconnect: true,
+    timeout: 30, // Set connect/request timeout to 30s to allow slow Diffie-Hellman handshakes on low-CPU cloud containers (Render)
   });
 
   // Mute GramJS verbose connection/ping socket traffic, only logging critical errors
   client.setLogLevel(LogLevel.ERROR);
+
 
 
   log.debug("TelegramClient created", { hasSession: sessionString.length > 0 });
